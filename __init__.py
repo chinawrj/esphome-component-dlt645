@@ -159,10 +159,10 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
     
-    # 总功率事件 (DI: 0x02030000) - 双参数：data_identifier + fake_power
+    # 总功率事件 (DI: 0x02030000) - 双参数：data_identifier + power_watts (单位: W)
     for conf in config.get(CONF_ON_ACTIVE_POWER, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "fake_power")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_watts")], conf)
     
     # 总电能事件 (DI: 0x00010000)
     for conf in config.get(CONF_ON_ENERGY_ACTIVE, []):

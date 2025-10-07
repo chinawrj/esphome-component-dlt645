@@ -2,13 +2,23 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
+#include "esphome/core/helpers.h"
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_timer.h"
+#include "driver/uart.h"
+#include "driver/gpio.h"
 #endif
+
+#include <vector>
+#include <cstring>
+#include <functional>
+#include <algorithm>
+#include <cstdio>
+#include <cmath>
 
 namespace esphome {
 namespace hello_world_component {
@@ -99,6 +109,26 @@ class HelloWorldComponent : public Component {
   static void hello_world_task_func(void* parameter);
   void process_hello_world_events();
   
+  // === DL/T 645-2007 UART通信相关方法 ===
+#if defined(USE_ESP32) || defined(USE_ESP_IDF)
+  bool init_dlt645_uart();                           // UART初始化
+  void deinit_dlt645_uart();                         // UART反初始化
+  bool send_dlt645_frame(const std::vector<uint8_t>& frame);  // 发送帧
+  void process_uart_data();                          // 处理UART数据
+  void check_and_parse_dlt645_frame();              // 检查和解析DL/T 645帧
+  
+  // DL/T 645-2007 帧构建和数据处理辅助函数
+  std::vector<uint8_t> build_dlt645_read_frame(const std::vector<uint8_t>& address, uint32_t data_identifier);
+  void scramble_dlt645_data(std::vector<uint8_t>& data);     // 数据加扰 (+0x33)
+  void unscramble_dlt645_data(std::vector<uint8_t>& data);   // 数据解扰 (-0x33)
+  float bcd_to_float(const std::vector<uint8_t>& bcd_data, int decimal_places);  // BCD转浮点
+  
+  // DL/T 645-2007 设备地址发现和数据查询函数
+  bool discover_meter_address();                             // 电表地址发现
+  bool query_active_power_total();                           // 查询总有功功率
+  void parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field);  // 根据DI解析数据
+#endif
+  
   uint32_t magic_number_{42};
   
   // 原有的通用回调管理器（保持向后兼容）
@@ -122,6 +152,52 @@ class HelloWorldComponent : public Component {
   EventGroupHandle_t event_group_{nullptr};
   bool task_running_{false};
 #endif
+
+  // === DL/T 645-2007 UART通信相关成员变量 ===
+  
+  // UART配置参数（来自YAML配置）
+  static constexpr int DLT645_TX_PIN = 1;        // GPIO1 - 发送引脚
+  static constexpr int DLT645_RX_PIN = 2;        // GPIO2 - 接收引脚
+  static constexpr int DLT645_BAUD_RATE = 2400;  // 波特率
+  static constexpr int DLT645_RX_BUFFER_SIZE = 256;  // 接收缓冲区大小
+  
+#if defined(USE_ESP32) || defined(USE_ESP_IDF)
+  uart_port_t uart_port_{UART_NUM_1};           // 使用UART1
+  bool uart_initialized_{false};                // UART初始化标志
+#endif
+  
+  // 电表地址管理（对应YAML中的globals）
+  std::vector<uint8_t> meter_address_bytes_;     // 电表实际地址
+  std::vector<uint8_t> broadcast_address_bytes_; // 广播地址
+  bool device_address_discovered_{false};       // 地址发现标志
+  
+  // UART响应处理（对应YAML中的响应缓冲逻辑）
+  std::vector<uint8_t> response_buffer_;         // 响应缓冲区
+  uint32_t last_data_receive_time_{0};           // 最后接收数据时间
+  bool waiting_for_response_{false};             // 等待响应标志
+  uint32_t frame_timeout_ms_{5000};              // 帧超时时间(5秒)
+  
+  // 请求-响应匹配
+  uint32_t last_sent_data_identifier_{0};        // 最后发送的数据标识符
+  
+  // 性能测量变量
+  uint32_t command_send_start_time_{0};
+  uint32_t first_response_byte_time_{0};
+  
+  // === DL/T 645解析数据缓存变量（用于线程安全的数据传递）===
+  // 这些变量在FreeRTOS任务中更新，在ESPHome主循环中读取
+  float cached_active_power_w_{0.0f};            // 总有功功率 (W)
+  float cached_energy_active_kwh_{0.0f};         // 正向有功总电能 (kWh)
+  float cached_voltage_a_v_{0.0f};               // A相电压 (V)
+  float cached_current_a_a_{0.0f};               // A相电流 (A)
+  float cached_power_factor_{0.0f};              // 总功率因数
+  float cached_frequency_hz_{0.0f};              // 电网频率 (Hz)
+  float cached_energy_reverse_kwh_{0.0f};        // 反向有功总电能 (kWh)
+  std::string cached_datetime_str_{""};          // 日期时间字符串
+  std::string cached_time_hms_str_{""};          // 时分秒字符串
+  
+  // 数据标识符缓存（用于callback传递）
+  uint32_t cached_data_identifier_{0};
 };
 
 // 原有的通用触发器（保持向后兼容）
@@ -147,8 +223,8 @@ class DeviceAddressTrigger : public Trigger<uint32_t> {
 class ActivePowerTrigger : public Trigger<uint32_t, float> {
  public:
   explicit ActivePowerTrigger(HelloWorldComponent *parent) {
-    parent->add_on_active_power_callback([this](uint32_t data_identifier, float fake_power) {
-      this->trigger(data_identifier, fake_power);
+    parent->add_on_active_power_callback([this](uint32_t data_identifier, float power_watts) {
+      this->trigger(data_identifier, power_watts);  // power_watts 以W为单位传递
     });
   }
 };
