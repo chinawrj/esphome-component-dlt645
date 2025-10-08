@@ -13,6 +13,7 @@ from esphome.const import (
 
 # 组件配置常量
 CONF_MAGIC_NUMBER = "magic_number"
+CONF_POWER_RATIO = "power_ratio"
 CONF_ON_HELLO_WORLD = "on_hello_world"
 
 # DL/T 645-2007 数据标识符独立事件配置常量
@@ -75,6 +76,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(HelloWorldComponent),
         cv.Optional(CONF_MAGIC_NUMBER, default=42): cv.uint32_t,
+        cv.Optional(CONF_POWER_RATIO, default=10): cv.int_range(min=1, max=100),
         
         # 原有的通用事件（保持向后兼容）
         cv.Optional(CONF_ON_HELLO_WORLD): automation.validate_automation(
@@ -146,6 +148,9 @@ async def to_code(config):
     
     # 设置magic_number
     cg.add(var.set_magic_number(config[CONF_MAGIC_NUMBER]))
+    
+    # 设置总功率查询比例参数
+    cg.add(var.set_power_ratio(config[CONF_POWER_RATIO]))
     
     # 注册原有的通用触发器（保持向后兼容）
     for conf in config.get(CONF_ON_HELLO_WORLD, []):

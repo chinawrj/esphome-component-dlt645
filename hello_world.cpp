@@ -249,50 +249,37 @@ void HelloWorldComponent::hello_world_task_func(void* parameter) {
 
     // === 2. DL/T 645 数据查询发送（1s间隔）===
     if (now - last_dlt645_send_time >= DLT645_SEND_INTERVAL_MS && false == component->waiting_for_response_) {
-        // 获取当前要查询的数据标识符
-        uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
-        const char* event_name = dlt645_event_names[current_event_index];
-        
-        ESP_LOGD(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", 
-                 current_event_index + 1, num_dlt645_events, event_name, data_identifier);
-        
-        // 根据当前数据标识符选择相应的查询函数
-        bool send_success = false;
-        if (data_identifier == 0x04000401) {
-          // 设备地址查询
-          send_success = component->discover_meter_address();
-        } else if (data_identifier == 0x02030000) {
-          // 总有功功率查询
-          send_success = component->query_active_power_total();
-        } else {
-          // 通用查询 - 使用当前已知地址或广播地址
-          std::vector<uint8_t> query_address = component->meter_address_bytes_;
-          if (query_address.empty()) {
-            query_address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};  // 广播地址
-          }
-          
-          std::vector<uint8_t> query_frame = component->build_dlt645_read_frame(query_address, data_identifier);
-          send_success = component->send_dlt645_frame(query_frame);
+      // 获取当前要查询的数据标识符
+      uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
+      const char* event_name = dlt645_event_names[current_event_index];
+      
+      ESP_LOGD(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name, data_identifier);
+      
+      // 根据当前数据标识符选择相应的查询函数
+      bool send_success = false;
+      if (data_identifier == 0x04000401) {
+        // 设备地址查询
+        send_success = component->discover_meter_address();
+      } else if (data_identifier == 0x02030000) {
+        // 总有功功率查询
+        send_success = component->query_active_power_total();
+      } else {
+        // 通用查询 - 使用当前已知地址或广播地址
+        std::vector<uint8_t> query_address = component->meter_address_bytes_;
+        if (query_address.empty()) {
+          query_address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};  // 广播地址
         }
         
-        if (!send_success) {
-          ESP_LOGW(TAG, "⚠️ DL/T 645查询发送失败: %s", event_name);
-        }
-        
-        // 移动到下一个数据标识符（循环）
-        current_event_index = (current_event_index + 1) % num_dlt645_events;
-        
-        // 如果电表地址已被发现，跳过设备地址查询（index 0）
-        if (current_event_index == 0 && component->device_address_discovered_) {
-          ESP_LOGD(TAG, "⏭️ 电表地址已发现，跳过设备地址查询");
-          current_event_index = 1;  // 跳到下一个有用的查询（总功率）
-        }
-        
-        if (current_event_index == 0) {
-          ESP_LOGD(TAG, "🔄 DL/T 645查询循环完成，重新开始...");
-        } else if (current_event_index == 1 && component->device_address_discovered_) {
-          ESP_LOGD(TAG, "🔄 DL/T 645查询循环完成（跳过地址查询），重新开始数据查询...");
-        }
+        std::vector<uint8_t> query_frame = component->build_dlt645_read_frame(query_address, data_identifier);
+        send_success = component->send_dlt645_frame(query_frame);
+      }
+      
+      if (!send_success) {
+        ESP_LOGW(TAG, "⚠️ DL/T 645查询发送失败: %s", event_name);
+      }
+      
+      // 使用新的事件索引管理函数
+      current_event_index = component->get_next_event_index(current_event_index, num_dlt645_events);
       
       last_dlt645_send_time = now;
     }
@@ -886,7 +873,7 @@ bool HelloWorldComponent::query_active_power_total() {
     // 继续使用广播地址，某些电表支持
   }
   
-  ESP_LOGI(TAG, "⚡ 查询DL/T 645电表总有功功率...");
+  ESP_LOGD(TAG, "⚡ 查询DL/T 645电表总有功功率...");
   
   // 使用当前已知地址（如果有的话），否则使用广播地址
   std::vector<uint8_t> meter_address = this->meter_address_bytes_;
@@ -1196,6 +1183,76 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
   }
+}
+
+// ============= 事件索引管理函数 =============
+
+size_t HelloWorldComponent::get_next_event_index(size_t current_index, size_t max_events) {
+  // 计算下一个事件索引（循环）
+  size_t next_index = (current_index + 1) % max_events;
+  
+  // 如果电表地址已被发现，跳过设备地址查询（index 0）
+  if (next_index == 0 && this->device_address_discovered_) {
+    ESP_LOGD(TAG, "⏭️ 电表地址已发现，跳过设备地址查询");
+    next_index = 1;  // 跳到下一个有用的查询（总功率）
+  }
+  
+  // === 实现查询比例控制：总功率查询 vs 其他查询 = N:1 ===
+  if (this->device_address_discovered_) {
+    // 情况1: 当前是总功率查询 (index=1)
+    if (current_index == 1) {
+      this->total_power_query_count_++;
+      
+      // 如果还没有达到N次总功率查询，继续执行总功率查询
+      if (this->total_power_query_count_ < this->power_ratio_) {
+        ESP_LOGD(TAG, "🔋 继续总功率查询 (%d/%d)", 
+                 this->total_power_query_count_, this->power_ratio_);
+        next_index = 1;  // 保持总功率查询
+      } else {
+        // 达到N次总功率查询后，执行下一个其他查询
+        ESP_LOGD(TAG, "🔄 总功率查询比例已满足 (%d次)，切换到其他查询", 
+                 this->power_ratio_);
+        
+        // 重置计数器
+        this->total_power_query_count_ = 0;
+        
+        // 执行下一个非总功率查询
+        next_index = this->last_non_power_query_index_;
+        
+        // 更新下一次非总功率查询的索引（循环到下一个）
+        this->last_non_power_query_index_ = (this->last_non_power_query_index_ + 1);
+        
+        // 如果超出范围或回到index 0,1，重置到index 2（总电能）
+        if (this->last_non_power_query_index_ >= max_events || 
+            this->last_non_power_query_index_ <= 1) {
+          this->last_non_power_query_index_ = 2;
+        }
+      }
+    }
+    // 情况2: 当前是其他查询 (非总功率)，下一个应该是总功率查询
+    else if (current_index >= 2) {
+      ESP_LOGD(TAG, "🔄 完成其他查询 (index=%d)，下一个执行总功率查询", current_index);
+      next_index = 1;  // 下一个总是总功率查询
+    }
+  }
+  
+  // 日志记录循环状态
+  if (next_index == 0) {
+    ESP_LOGD(TAG, "🔄 DL/T 645查询循环完成，重新开始...");
+  } else if (next_index == 1 && this->device_address_discovered_) {
+    ESP_LOGD(TAG, "⚡ 执行总功率查询 (index=1)");
+  } else if (next_index >= 2) {
+    ESP_LOGD(TAG, "📊 执行其他数据查询 (index=%d)", next_index);
+  }
+  
+  // 输出查询比例状态信息
+  if (this->device_address_discovered_) {
+    ESP_LOGD(TAG, "📊 查询状态 - 总功率计数: %d/%d, 下次其他查询索引: %d", 
+             this->total_power_query_count_, this->power_ratio_,
+             this->last_non_power_query_index_);
+  }
+  
+  return next_index;
 }
 
 #endif  // defined(USE_ESP32) || defined(USE_ESP_IDF)

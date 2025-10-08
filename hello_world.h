@@ -63,6 +63,9 @@ class HelloWorldComponent : public Component {
   
   void set_magic_number(uint32_t magic_number) { this->magic_number_ = magic_number; }
   
+  // 设置总功率查询比例控制参数
+  void set_power_ratio(int ratio) { this->power_ratio_ = ratio; }
+  
   // 原有的通用回调函数（保持向后兼容）
   void add_on_hello_world_callback(std::function<void(uint32_t)> &&callback) {
     this->hello_world_callback_.add(std::move(callback));
@@ -127,9 +130,17 @@ class HelloWorldComponent : public Component {
   bool discover_meter_address();                             // 电表地址发现
   bool query_active_power_total();                           // 查询总有功功率
   void parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field);  // 根据DI解析数据
+  
+  // 事件索引管理函数
+  size_t get_next_event_index(size_t current_index, size_t max_events);  // 获取下一个事件索引
 #endif
   
   uint32_t magic_number_{42};
+  
+  // 查询比例控制参数
+  int power_ratio_{10};                        // 默认10:1比例，每10次总功率查询执行1次其他查询
+  int total_power_query_count_{0};            // 总功率查询计数器
+  size_t last_non_power_query_index_{2};      // 保存上次"非总功率"查询的索引（从2开始，即总电能）
   
   // 原有的通用回调管理器（保持向后兼容）
   CallbackManager<void(uint32_t)> hello_world_callback_;
