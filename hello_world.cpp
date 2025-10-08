@@ -820,6 +820,30 @@ float HelloWorldComponent::bcd_to_float(const std::vector<uint8_t>& bcd_data, in
   return (float)int_value / pow(10, decimal_places);
 }
 
+// DL/T 645-2007 带符号位的BCD转换函数
+float HelloWorldComponent::bcd_to_float_with_sign(const std::vector<uint8_t>& bcd_data, int decimal_places) {
+  if (bcd_data.empty()) {
+    ESP_LOGW(TAG, "⚠️ BCD数据为空");
+    return 0.0f;
+  }
+  
+  // 检查符号位 (最高字节的最高位)
+  bool is_negative = (bcd_data.back() & 0x80) != 0;
+  
+  // 创建数据副本并清除符号位
+  std::vector<uint8_t> clean_bcd_data = bcd_data;
+  clean_bcd_data.back() &= 0x7F;  // 清除最高字节的符号位
+  
+  ESP_LOGD(TAG, "📊 BCD符号位处理: 原始最高字节=0x%02X, 清除后=0x%02X, 符号=%s", 
+           bcd_data.back(), clean_bcd_data.back(), is_negative ? "负" : "正");
+  
+  // 进行标准BCD转换
+  float result = bcd_to_float(clean_bcd_data, decimal_places);
+  
+  // 应用符号
+  return is_negative ? -result : result;
+}
+
 // ============= DL/T 645-2007 设备地址发现和数据查询函数 =============
 
 bool HelloWorldComponent::discover_meter_address() {
@@ -943,12 +967,13 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
     case 0x02030000: {  // 总有功功率
       if (actual_data.size() >= 3) {
         // DL/T 645功率格式：3字节BCD，XX.XXXX kW (4位小数)
-        float power_kw = bcd_to_float(actual_data, 4);
         
-        // 检查符号位 (最高字节的最高位)
-        if (actual_data[2] & 0x80) {
-          power_kw = -power_kw;
-        }
+        // 输出原始功率数据用于调试
+        ESP_LOGD(TAG, "📊 总有功功率原始数据: %02X %02X %02X", 
+                 actual_data[0], actual_data[1], actual_data[2]);
+        
+        // 使用支持符号位的BCD转换函数
+        float power_kw = bcd_to_float_with_sign(actual_data, 4);
         
         // 转换为W单位存储
         float power_w = power_kw * 1000.0f;

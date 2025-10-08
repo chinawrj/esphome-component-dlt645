@@ -125,6 +125,7 @@ class HelloWorldComponent : public Component {
   void scramble_dlt645_data(std::vector<uint8_t>& data);     // 数据加扰 (+0x33)
   void unscramble_dlt645_data(std::vector<uint8_t>& data);   // 数据解扰 (-0x33)
   float bcd_to_float(const std::vector<uint8_t>& bcd_data, int decimal_places);  // BCD转浮点
+  float bcd_to_float_with_sign(const std::vector<uint8_t>& bcd_data, int decimal_places);  // BCD转浮点（支持符号位）
   
   // DL/T 645-2007 设备地址发现和数据查询函数
   bool discover_meter_address();                             // 电表地址发现
