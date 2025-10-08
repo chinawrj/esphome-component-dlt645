@@ -233,9 +233,9 @@ void HelloWorldComponent::hello_world_task_func(void* parameter) {
   
   // === DL/T 645-2007 UART通信主循环 ===
   uint32_t last_dlt645_send_time = 0;
-  const uint32_t DLT645_SEND_INTERVAL_MS = 1000;  // 1秒发送间隔（对应YAML中的1s interval）
+  const uint32_t DLT645_SEND_INTERVAL_MS = 50;  // 1秒发送间隔（对应YAML中的1s interval）
   uint32_t last_uart_read_time = 0;
-  const uint32_t UART_READ_INTERVAL_MS = 10;      // 10ms读取间隔（对应YAML中的10ms interval）
+  const uint32_t UART_READ_INTERVAL_MS = 5;
   
   // 任务主循环 - DL/T 645通信 + 事件触发
   while (component->task_running_) {
@@ -246,16 +246,14 @@ void HelloWorldComponent::hello_world_task_func(void* parameter) {
       component->process_uart_data();
       last_uart_read_time = now;
     }
-    
-    // === 2. DL/T 645 数据查询发送（1s间隔）===  
-    if (now - last_dlt645_send_time >= DLT645_SEND_INTERVAL_MS) {
-      // 检查是否有正在等待的响应（避免命令重叠）
-      if (!component->waiting_for_response_) {
+
+    // === 2. DL/T 645 数据查询发送（1s间隔）===
+    if (now - last_dlt645_send_time >= DLT645_SEND_INTERVAL_MS && false == component->waiting_for_response_) {
         // 获取当前要查询的数据标识符
         uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
         const char* event_name = dlt645_event_names[current_event_index];
         
-        ESP_LOGI(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", 
+        ESP_LOGD(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", 
                  current_event_index + 1, num_dlt645_events, event_name, data_identifier);
         
         // 根据当前数据标识符选择相应的查询函数
@@ -284,35 +282,19 @@ void HelloWorldComponent::hello_world_task_func(void* parameter) {
         // 移动到下一个数据标识符（循环）
         current_event_index = (current_event_index + 1) % num_dlt645_events;
         
-        if (current_event_index == 0) {
-          ESP_LOGI(TAG, "🔄 DL/T 645查询循环完成，重新开始...");
+        // 如果电表地址已被发现，跳过设备地址查询（index 0）
+        if (current_event_index == 0 && component->device_address_discovered_) {
+          ESP_LOGD(TAG, "⏭️ 电表地址已发现，跳过设备地址查询");
+          current_event_index = 1;  // 跳到下一个有用的查询（总功率）
         }
-      } else {
-        ESP_LOGW(TAG, "⚠️ 上次查询响应未完成，跳过本次发送");
-      }
+        
+        if (current_event_index == 0) {
+          ESP_LOGD(TAG, "🔄 DL/T 645查询循环完成，重新开始...");
+        } else if (current_event_index == 1 && component->device_address_discovered_) {
+          ESP_LOGD(TAG, "🔄 DL/T 645查询循环完成（跳过地址查询），重新开始数据查询...");
+        }
       
       last_dlt645_send_time = now;
-    }
-    
-    // === 3. 原有事件触发逻辑（5s间隔）===
-    if (now - last_trigger_time >= HELLO_WORLD_TRIGGER_INTERVAL_MS) {
-      // 获取当前要触发的事件位和相关信息
-      EventBits_t current_event_bit = dlt645_event_bits[current_event_index];
-      const char* event_name = dlt645_event_names[current_event_index];
-      uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
-      
-      ESP_LOGI(TAG, "🎯 触发DL/T 645事件: %s (DI: 0x%08X, BIT: %d)", 
-               event_name, data_identifier, __builtin_ctzl(current_event_bit));
-      
-      // 设置事件组中的对应事件位
-      EventBits_t result = xEventGroupSetBits(component->event_group_, current_event_bit);
-      if (result & current_event_bit) {
-        ESP_LOGD(TAG, "📤 事件位已设置: %s, time=%lu", event_name, (unsigned long)now);
-      } else {
-        ESP_LOGW(TAG, "⚠️ 设置事件位失败: %s", event_name);
-      }
-      
-      last_trigger_time = now;
     }
     
     // 任务延迟 - 释放CPU给其他任务
@@ -374,7 +356,7 @@ void HelloWorldComponent::process_hello_world_events() {
     if (event_bits & dlt645_events[i].bit) {
       int bit_num = __builtin_ctzl(dlt645_events[i].bit);  // 计算位号
       
-      ESP_LOGI(TAG, "📥 检测到DL/T 645事件: %s (DI: 0x%08X, BIT%d)", 
+      ESP_LOGD(TAG, "📥 检测到DL/T 645事件: %s (DI: 0x%08X, BIT%d)", 
                dlt645_events[i].name, dlt645_events[i].data_identifier, bit_num);
       
       // 根据事件位调用对应的独立回调函数
@@ -383,40 +365,39 @@ void HelloWorldComponent::process_hello_world_events() {
           this->device_address_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_ACTIVE_POWER_TOTAL:
-          // 使用缓存的真实功率数据而不是fake数据
-          ESP_LOGI(TAG, "📊 传递真实功率值: %.1f W", this->cached_active_power_w_);
+          ESP_LOGD(TAG, "📊 传递功率值: %.1f W", this->cached_active_power_w_);
           this->active_power_callback_.call(this->cached_data_identifier_, this->cached_active_power_w_);
           break;
         case EVENT_DI_ENERGY_ACTIVE_TOTAL:
-          ESP_LOGI(TAG, "🔋 传递总电能值: %.2f kWh", this->cached_energy_active_kwh_);
+          ESP_LOGD(TAG, "🔋 传递总电能值: %.2f kWh", this->cached_energy_active_kwh_);
           this->energy_active_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_VOLTAGE_A_PHASE:
-          ESP_LOGI(TAG, "🔌 传递A相电压值: %.1f V", this->cached_voltage_a_v_);
+          ESP_LOGD(TAG, "🔌 传递A相电压值: %.1f V", this->cached_voltage_a_v_);
           this->voltage_a_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_CURRENT_A_PHASE:
-          ESP_LOGI(TAG, "🔄 传递A相电流值: %.3f A", this->cached_current_a_a_);
+          ESP_LOGD(TAG, "🔄 传递A相电流值: %.3f A", this->cached_current_a_a_);
           this->current_a_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_POWER_FACTOR_TOTAL:
-          ESP_LOGI(TAG, "📈 传递功率因数值: %.3f", this->cached_power_factor_);
+          ESP_LOGD(TAG, "📈 传递功率因数值: %.3f", this->cached_power_factor_);
           this->power_factor_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_FREQUENCY:
-          ESP_LOGI(TAG, "🌊 传递频率值: %.2f Hz", this->cached_frequency_hz_);
+          ESP_LOGD(TAG, "🌊 传递频率值: %.2f Hz", this->cached_frequency_hz_);
           this->frequency_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_ENERGY_REVERSE_TOTAL:
-          ESP_LOGI(TAG, "🔄 传递反向电能值: %.2f kWh", this->cached_energy_reverse_kwh_);
+          ESP_LOGD(TAG, "🔄 传递反向电能值: %.2f kWh", this->cached_energy_reverse_kwh_);
           this->energy_reverse_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_DATETIME:
-          ESP_LOGI(TAG, "📅 传递日期时间: %s", this->cached_datetime_str_.c_str());
+          ESP_LOGD(TAG, "📅 传递日期时间: %s", this->cached_datetime_str_.c_str());
           this->datetime_callback_.call(this->cached_data_identifier_);
           break;
         case EVENT_DI_TIME_HMS:
-          ESP_LOGI(TAG, "⏰ 传递时分秒: %s", this->cached_time_hms_str_.c_str());
+          ESP_LOGD(TAG, "⏰ 传递时分秒: %s", this->cached_time_hms_str_.c_str());
           this->time_hms_callback_.call(this->cached_data_identifier_);
           break;
         default:
@@ -708,7 +689,7 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
     return;
   }
   
-  ESP_LOGI(TAG, "✅ DL/T 645帧验证成功，开始解析数据域");
+  ESP_LOGD(TAG, "✅ DL/T 645帧验证成功，开始解析数据域");
   
   // 提取并解扰数据域
   std::vector<uint8_t> data_field(data_length);
@@ -724,7 +705,7 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
     uint32_t data_identifier = data_field[0] | (data_field[1] << 8) | 
                               (data_field[2] << 16) | (data_field[3] << 24);
     
-    ESP_LOGI(TAG, "🎯 数据标识符: 0x%08X", data_identifier);
+    ESP_LOGD(TAG, "🎯 数据标识符: 0x%08X", data_identifier);
     
     // 根据数据标识符解析相应的数据
     parse_dlt645_data_by_identifier(data_identifier, data_field);
@@ -732,9 +713,24 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
   
   // 更新电表地址
   if (address[0] != 0x99 || address[1] != 0x99) {  // 非广播地址
-    this->meter_address_bytes_ = address;
-    ESP_LOGI(TAG, "📍 更新电表地址: %02X %02X %02X %02X %02X %02X", 
-             address[0], address[1], address[2], address[3], address[4], address[5]);
+    // Check if address has actually changed before updating
+    bool address_changed = false;
+    if (this->meter_address_bytes_.size() != 6) {
+      address_changed = true;
+    } else {
+      for (int i = 0; i < 6; i++) {
+        if (this->meter_address_bytes_[i] != address[i]) {
+          address_changed = true;
+          break;
+        }
+      }
+    }
+    if (address_changed) {
+      this->meter_address_bytes_ = address;
+      ESP_LOGI(TAG, "📍 更新电表地址: %02X %02X %02X %02X %02X %02X", 
+           address[0], address[1], address[2], address[3], address[4], address[5]);
+      this->device_address_discovered_ = true;
+    }
   }
   
   // 清空缓冲区并重置等待状态
@@ -862,7 +858,7 @@ bool HelloWorldComponent::discover_meter_address() {
   bool success = send_dlt645_frame(discover_frame);
   
   if (success) {
-    ESP_LOGI(TAG, "✅ 地址发现命令已发送，等待电表响应...");
+    ESP_LOGD(TAG, "✅ 地址发现命令已发送，等待电表响应...");
     
     // 触发设备地址查询事件
     // 注意：这里使用EVENT_DI_DEVICE_ADDRESS事件位
@@ -915,12 +911,7 @@ bool HelloWorldComponent::query_active_power_total() {
   bool success = send_dlt645_frame(power_query_frame);
   
   if (success) {
-    ESP_LOGI(TAG, "✅ 总有功功率查询命令已发送，等待电表响应...");
-    
-    // 触发总有功功率查询事件
-    if (this->event_group_ != nullptr) {
-      xEventGroupSetBits(this->event_group_, EVENT_DI_ACTIVE_POWER_TOTAL);
-    }
+    ESP_LOGD(TAG, "✅ 总有功功率查询命令已发送，等待电表响应...");
   } else {
     ESP_LOGE(TAG, "❌ 总有功功率查询命令发送失败");
   }
@@ -930,7 +921,7 @@ bool HelloWorldComponent::query_active_power_total() {
 
 // 根据数据标识符解析DL/T 645数据
 void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field) {
-  ESP_LOGI(TAG, "🔍 解析DL/T 645数据 - DI: 0x%08X, 数据长度: %d", data_identifier, data_field.size());
+  ESP_LOGD(TAG, "🔍 解析DL/T 645数据 - DI: 0x%08X, 数据长度: %d", data_identifier, data_field.size());
   
   // 跳过数据标识符 (前4字节)，获取实际数据
   if (data_field.size() <= 4) {
