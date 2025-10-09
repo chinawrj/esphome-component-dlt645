@@ -1,4 +1,4 @@
-#include "hello_world.h"
+#include "dlt645.h"
 #include "esphome/core/log.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
@@ -13,9 +13,9 @@
 #endif
 
 namespace esphome {
-namespace hello_world_component {
+namespace dlt645_component {
 
-static const char *const TAG = "hello_world_component";
+static const char *const TAG = "dlt645_component";
 
 // 获取毫秒数的跨平台函数
 uint32_t get_current_time_ms() {
@@ -27,8 +27,8 @@ uint32_t get_current_time_ms() {
 #endif
 }
 
-void HelloWorldComponent::setup() {
-  ESP_LOGCONFIG(TAG, "🚀 设置带FreeRTOS任务的Hello World组件...");
+void DLT645Component::setup() {
+  ESP_LOGCONFIG(TAG, "🚀 设置带FreeRTOS任务的DLT645组件...");
   ESP_LOGCONFIG(TAG, "Magic Number: %lu", (unsigned long)this->magic_number_);
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
@@ -68,14 +68,14 @@ void HelloWorldComponent::setup() {
   assert(this->event_group_ != nullptr && "事件组创建失败");
   
   // 创建FreeRTOS任务
-  if (!this->create_hello_world_task()) {
+  if (!this->create_dlt645_task()) {
     ESP_LOGE(TAG, "❌ 创建FreeRTOS任务失败");
     this->mark_failed();
     return;
   }
   
   ESP_LOGCONFIG(TAG, "✅ FreeRTOS任务已创建，将每 %lu 秒触发一次事件", 
-                (unsigned long)(HELLO_WORLD_TRIGGER_INTERVAL_MS / 1000));
+                (unsigned long)(DLT645_TRIGGER_INTERVAL_MS / 1000));
 #else
   ESP_LOGW(TAG, "⚠️ 非ESP32平台，降级为loop模式");
 #endif
@@ -83,30 +83,30 @@ void HelloWorldComponent::setup() {
   ESP_LOGCONFIG(TAG, "✅ Hello World组件设置完成");
 }
 
-void HelloWorldComponent::loop() {
+void DLT645Component::loop() {
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
   // 在ESP32上，主要逻辑在FreeRTOS任务中，loop只处理事件组中的事件
-  this->process_hello_world_events();
+  this->process_dlt645_events();
 #else
   // 非ESP32平台的备用实现
   static uint32_t last_trigger_time = 0;
   uint32_t now = get_current_time_ms();
-  if (now - last_trigger_time >= HELLO_WORLD_TRIGGER_INTERVAL_MS) {
+  if (now - last_trigger_time >= DLT645_TRIGGER_INTERVAL_MS) {
     this->trigger_hello_world_event();
     last_trigger_time = now;
   }
 #endif
 }
 
-void HelloWorldComponent::dump_config() {
+void DLT645Component::dump_config() {
   ESP_LOGCONFIG(TAG, "Hello World Component (FreeRTOS Task版本):");
   ESP_LOGCONFIG(TAG, "  Magic Number: %lu", (unsigned long)this->magic_number_);
   ESP_LOGCONFIG(TAG, "  Trigger Interval: %lu 秒", 
-                (unsigned long)(HELLO_WORLD_TRIGGER_INTERVAL_MS / 1000));
+                (unsigned long)(DLT645_TRIGGER_INTERVAL_MS / 1000));
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
   ESP_LOGCONFIG(TAG, "  Task Status: %s", this->task_running_ ? "运行中" : "已停止");
-  ESP_LOGCONFIG(TAG, "  Task Stack Size: %lu 字节", (unsigned long)HELLO_WORLD_TASK_STACK_SIZE);
-  ESP_LOGCONFIG(TAG, "  Task Priority: %d", (int)HELLO_WORLD_TASK_PRIORITY);
+  ESP_LOGCONFIG(TAG, "  Task Stack Size: %lu 字节", (unsigned long)DLT645_TASK_STACK_SIZE);
+  ESP_LOGCONFIG(TAG, "  Task Priority: %d", (int)DLT645_TASK_PRIORITY);
   ESP_LOGCONFIG(TAG, "  Event Group: 已创建");
   ESP_LOGCONFIG(TAG, "  DL/T 645 超时配置:");
   ESP_LOGCONFIG(TAG, "    - 一般命令超时: %lu ms", (unsigned long)this->frame_timeout_ms_);
@@ -114,7 +114,7 @@ void HelloWorldComponent::dump_config() {
 #endif
 }
 
-void HelloWorldComponent::trigger_hello_world_event() {
+void DLT645Component::trigger_hello_world_event() {
   ESP_LOGD(TAG, "🌍 Hello World 事件触发! Magic Number: %lu", 
            (unsigned long)this->magic_number_);
   this->hello_world_callback_.call(this->magic_number_);
@@ -122,8 +122,8 @@ void HelloWorldComponent::trigger_hello_world_event() {
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
 
-bool HelloWorldComponent::create_hello_world_task() {
-  if (this->hello_world_task_handle_ != nullptr) {
+bool DLT645Component::create_dlt645_task() {
+  if (this->dlt645_task_handle_ != nullptr) {
     ESP_LOGW(TAG, "⚠️ FreeRTOS任务已存在");
     return true;
   }
@@ -132,12 +132,12 @@ bool HelloWorldComponent::create_hello_world_task() {
   
   // 创建FreeRTOS任务 - 参考ESP32Camera的实现方式
   BaseType_t result = xTaskCreate(
-    &HelloWorldComponent::hello_world_task_func,  // 任务函数
-    "hello_world_task",                           // 任务名称
-    HELLO_WORLD_TASK_STACK_SIZE,                  // 堆栈大小
+    &DLT645Component::dlt645_task_func,  // 任务函数
+    "dlt645_task",                           // 任务名称
+    DLT645_TASK_STACK_SIZE,                  // 堆栈大小
     this,                                         // 传递给任务的参数(this指针)
-    HELLO_WORLD_TASK_PRIORITY,                    // 任务优先级
-    &this->hello_world_task_handle_               // 任务句柄
+    DLT645_TASK_PRIORITY,                    // 任务优先级
+    &this->dlt645_task_handle_               // 任务句柄
   );
   
   if (result != pdPASS) {
@@ -149,8 +149,8 @@ bool HelloWorldComponent::create_hello_world_task() {
   return true;
 }
 
-void HelloWorldComponent::destroy_hello_world_task() {
-  if (this->hello_world_task_handle_ == nullptr) {
+void DLT645Component::destroy_dlt645_task() {
+  if (this->dlt645_task_handle_ == nullptr) {
     return;
   }
   
@@ -161,9 +161,9 @@ void HelloWorldComponent::destroy_hello_world_task() {
   vTaskDelay(pdMS_TO_TICKS(100));
   
   // 删除任务
-  if (this->hello_world_task_handle_ != nullptr) {
-    vTaskDelete(this->hello_world_task_handle_);
-    this->hello_world_task_handle_ = nullptr;
+  if (this->dlt645_task_handle_ != nullptr) {
+    vTaskDelete(this->dlt645_task_handle_);
+    this->dlt645_task_handle_ = nullptr;
   }
   
   // 删除事件组
@@ -175,9 +175,9 @@ void HelloWorldComponent::destroy_hello_world_task() {
 }
 
 // Static task function - runs in independent FreeRTOS task
-void HelloWorldComponent::hello_world_task_func(void* parameter) 
+void DLT645Component::dlt645_task_func(void* parameter) 
 {
-  HelloWorldComponent* component = static_cast<HelloWorldComponent*>(parameter);
+  DLT645Component* component = static_cast<DLT645Component*>(parameter);
   
   ESP_LOGI(TAG, "🚀 FreeRTOS task started, task handle: %p", xTaskGetCurrentTaskHandle());
   ESP_LOGI(TAG, "📊 Task stack high water mark: %lu bytes", (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
@@ -284,11 +284,11 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
   }
   
   // 任务清理并自我删除
-  component->hello_world_task_handle_ = nullptr;
+  component->dlt645_task_handle_ = nullptr;
   vTaskDelete(nullptr);
 }
 
-void HelloWorldComponent::process_hello_world_events() {
+void DLT645Component::process_dlt645_events() {
   // 非阻塞地检查事件组中的事件位
   EventBits_t event_bits = xEventGroupWaitBits(
     this->event_group_,     // 事件组句柄
@@ -390,7 +390,7 @@ void HelloWorldComponent::process_hello_world_events() {
 
 // === DL/T 645-2007 UART通信实现 ===
 
-bool HelloWorldComponent::init_dlt645_uart() {
+bool DLT645Component::init_dlt645_uart() {
   ESP_LOGI(TAG, "🔧 初始化DL/T 645-2007 UART通信...");
   
   // 使用当前波特率列表中的波特率
@@ -442,7 +442,7 @@ bool HelloWorldComponent::init_dlt645_uart() {
   return true;
 }
 
-void HelloWorldComponent::deinit_dlt645_uart() {
+void DLT645Component::deinit_dlt645_uart() {
   if (this->uart_initialized_) {
     ESP_LOGD(TAG, "🧹 反初始化DL/T 645 UART...");
     uart_driver_delete(this->uart_port_);
@@ -453,7 +453,7 @@ void HelloWorldComponent::deinit_dlt645_uart() {
 
 // === 动态波特率切换功能实现 ===
 
-bool HelloWorldComponent::change_uart_baud_rate(int new_baud_rate) {
+bool DLT645Component::change_uart_baud_rate(int new_baud_rate) {
   if (!this->uart_initialized_) {
     ESP_LOGE(TAG, "❌ UART未初始化，无法切换波特率");
     return false;
@@ -507,7 +507,7 @@ bool HelloWorldComponent::change_uart_baud_rate(int new_baud_rate) {
   return true;
 }
 
-void HelloWorldComponent::cycle_to_next_baud_rate() {
+void DLT645Component::cycle_to_next_baud_rate() {
   // 获取当前波特率用于日志显示
   int current_baud_rate = this->baud_rate_list_[this->current_baud_rate_index_];
   
@@ -524,7 +524,7 @@ void HelloWorldComponent::cycle_to_next_baud_rate() {
   }
 }
 
-bool HelloWorldComponent::send_dlt645_frame(const std::vector<uint8_t>& frame_data, uint32_t timeout_ms) {
+bool DLT645Component::send_dlt645_frame(const std::vector<uint8_t>& frame_data, uint32_t timeout_ms) {
   if (!this->uart_initialized_) {
     ESP_LOGE(TAG, "❌ UART未初始化，无法发送数据帧");
     return false;
@@ -565,7 +565,7 @@ bool HelloWorldComponent::send_dlt645_frame(const std::vector<uint8_t>& frame_da
   return true;
 }
 
-void HelloWorldComponent::process_uart_data() {
+void DLT645Component::process_uart_data() {
   if (!this->uart_initialized_) {
     return;
   }
@@ -641,7 +641,7 @@ void HelloWorldComponent::process_uart_data() {
   }
 }
 
-void HelloWorldComponent::check_and_parse_dlt645_frame() {
+void DLT645Component::check_and_parse_dlt645_frame() {
   // 检查最小帧长度
   if (this->response_buffer_.size() < 12) {
     return;  // 数据不够构成最小帧
@@ -801,7 +801,7 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
 
 // ============= DL/T 645-2007 帧构建辅助函数 =============
 
-std::vector<uint8_t> HelloWorldComponent::build_dlt645_read_frame(
+std::vector<uint8_t> DLT645Component::build_dlt645_read_frame(
     const std::vector<uint8_t>& address, uint32_t data_identifier) {
   
   std::vector<uint8_t> frame;
@@ -856,20 +856,20 @@ std::vector<uint8_t> HelloWorldComponent::build_dlt645_read_frame(
 }
 
 // 数据加扰/解扰函数
-void HelloWorldComponent::scramble_dlt645_data(std::vector<uint8_t>& data) {
+void DLT645Component::scramble_dlt645_data(std::vector<uint8_t>& data) {
   for (size_t i = 0; i < data.size(); i++) {
     data[i] += 0x33;
   }
 }
 
-void HelloWorldComponent::unscramble_dlt645_data(std::vector<uint8_t>& data) {
+void DLT645Component::unscramble_dlt645_data(std::vector<uint8_t>& data) {
   for (size_t i = 0; i < data.size(); i++) {
     data[i] -= 0x33;
   }
 }
 
 // BCD到浮点转换函数
-float HelloWorldComponent::bcd_to_float(const std::vector<uint8_t>& bcd_data, int decimal_places) {
+float DLT645Component::bcd_to_float(const std::vector<uint8_t>& bcd_data, int decimal_places) {
   uint32_t int_value = 0;
   uint32_t multiplier = 1;
   
@@ -893,7 +893,7 @@ float HelloWorldComponent::bcd_to_float(const std::vector<uint8_t>& bcd_data, in
 }
 
 // DL/T 645-2007 带符号位的BCD转换函数
-float HelloWorldComponent::bcd_to_float_with_sign(const std::vector<uint8_t>& bcd_data, int decimal_places) {
+float DLT645Component::bcd_to_float_with_sign(const std::vector<uint8_t>& bcd_data, int decimal_places) {
   if (bcd_data.empty()) {
     ESP_LOGW(TAG, "⚠️ BCD数据为空");
     return 0.0f;
@@ -918,7 +918,7 @@ float HelloWorldComponent::bcd_to_float_with_sign(const std::vector<uint8_t>& bc
 
 // ============= DL/T 645-2007 设备地址发现和数据查询函数 =============
 
-bool HelloWorldComponent::discover_meter_address() {
+bool DLT645Component::discover_meter_address() {
   if (!this->uart_initialized_) {
     ESP_LOGE(TAG, "❌ UART未初始化，无法执行地址发现");
     return false;
@@ -952,7 +952,7 @@ bool HelloWorldComponent::discover_meter_address() {
   return success;
 }
 
-bool HelloWorldComponent::query_active_power_total() {
+bool DLT645Component::query_active_power_total() {
   if (!this->uart_initialized_) {
     ESP_LOGE(TAG, "❌ UART未初始化，无法查询总有功功率");
     return false;
@@ -1003,7 +1003,7 @@ bool HelloWorldComponent::query_active_power_total() {
 }
 
 // 根据数据标识符解析DL/T 645数据
-void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field) {
+void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field) {
   ESP_LOGD(TAG, "🔍 解析DL/T 645数据 - DI: 0x%08X, 数据长度: %d", data_identifier, data_field.size());
   
   // 跳过数据标识符 (前4字节)，获取实际数据
@@ -1273,7 +1273,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
 
 // ============= 事件索引管理函数 =============
 
-size_t HelloWorldComponent::get_next_event_index(size_t current_index, size_t max_events) {
+size_t DLT645Component::get_next_event_index(size_t current_index, size_t max_events) {
   if (false == this->device_address_discovered_) {
     // 如果电表地址尚未发现，始终返回0以继续地址发现
     return 0;
@@ -1347,5 +1347,5 @@ size_t HelloWorldComponent::get_next_event_index(size_t current_index, size_t ma
 
 #endif  // defined(USE_ESP32) || defined(USE_ESP_IDF)
 
-}  // namespace hello_world_component
+}  // namespace dlt645_component
 }  // namespace esphome

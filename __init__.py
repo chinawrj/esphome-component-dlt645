@@ -1,7 +1,7 @@
 """
-ESPHome Hello World Component
-一个用于演示ESPHome外部组件开发的Hello World示例，
-每5秒触发一次hello_world事件，事件中包含可配置的magic_number数据。
+ESPHome DLT645 Component
+一个用于DL/T 645-2007智能电表通信协议的ESPHome组件，
+支持UART通信和多种电力参数的实时监测。
 """
 from esphome import automation
 import esphome.codegen as cg
@@ -29,52 +29,52 @@ CONF_ON_DATETIME = "on_datetime"
 CONF_ON_TIME_HMS = "on_time_hms"
 
 # 定义组件命名空间
-hello_world_component_ns = cg.esphome_ns.namespace("hello_world_component")
+dlt645_component_ns = cg.esphome_ns.namespace("dlt645_component")
 
 # 声明主组件类
-HelloWorldComponent = hello_world_component_ns.class_("HelloWorldComponent", cg.Component)
+DLT645Component = dlt645_component_ns.class_("DLT645Component", cg.Component)
 
 # 声明Trigger类，用于自动化
-HelloWorldTrigger = hello_world_component_ns.class_(
+HelloWorldTrigger = dlt645_component_ns.class_(
     "HelloWorldTrigger", automation.Trigger.template(cg.uint32)
 )
 
 # DL/T 645-2007 数据标识符独立事件触发器类
-DeviceAddressTrigger = hello_world_component_ns.class_(
+DeviceAddressTrigger = dlt645_component_ns.class_(
     "DeviceAddressTrigger", automation.Trigger.template(cg.uint32)
 )
-ActivePowerTrigger = hello_world_component_ns.class_(
+ActivePowerTrigger = dlt645_component_ns.class_(
     "ActivePowerTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-EnergyActiveTrigger = hello_world_component_ns.class_(
+EnergyActiveTrigger = dlt645_component_ns.class_(
     "EnergyActiveTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-VoltageATrigger = hello_world_component_ns.class_(
+VoltageATrigger = dlt645_component_ns.class_(
     "VoltageATrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-CurrentATrigger = hello_world_component_ns.class_(
+CurrentATrigger = dlt645_component_ns.class_(
     "CurrentATrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-PowerFactorTrigger = hello_world_component_ns.class_(
+PowerFactorTrigger = dlt645_component_ns.class_(
     "PowerFactorTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-FrequencyTrigger = hello_world_component_ns.class_(
+FrequencyTrigger = dlt645_component_ns.class_(
     "FrequencyTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-EnergyReverseTrigger = hello_world_component_ns.class_(
+EnergyReverseTrigger = dlt645_component_ns.class_(
     "EnergyReverseTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
-DatetimeTrigger = hello_world_component_ns.class_(
+DatetimeTrigger = dlt645_component_ns.class_(
     "DatetimeTrigger", automation.Trigger.template(cg.uint32, cg.uint32, cg.uint32, cg.uint32, cg.uint32)
 )
-TimeHmsTrigger = hello_world_component_ns.class_(
+TimeHmsTrigger = dlt645_component_ns.class_(
     "TimeHmsTrigger", automation.Trigger.template(cg.uint32, cg.uint32, cg.uint32, cg.uint32)
 )
 
 # 组件配置架构
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(HelloWorldComponent),
+        cv.GenerateID(): cv.declare_id(DLT645Component),
         cv.Optional(CONF_MAGIC_NUMBER, default=42): cv.uint32_t,
         cv.Optional(CONF_POWER_RATIO, default=10): cv.int_range(min=1, max=100),
         

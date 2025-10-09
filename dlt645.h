@@ -22,14 +22,14 @@
 #include <cmath>
 
 namespace esphome {
-namespace hello_world_component {
+namespace dlt645_component {
 
 // FreeRTOS任务配置常量
-constexpr uint32_t HELLO_WORLD_TASK_STACK_SIZE = 4096;  // 4KB堆栈
+constexpr uint32_t DLT645_TASK_STACK_SIZE = 4096;  // 4KB堆栈
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
-constexpr UBaseType_t HELLO_WORLD_TASK_PRIORITY = 5;    // 中等优先级
+constexpr UBaseType_t DLT645_TASK_PRIORITY = 5;    // 中等优先级
 #endif
-constexpr uint32_t HELLO_WORLD_TRIGGER_INTERVAL_MS = 5000;  // 5秒间隔
+constexpr uint32_t DLT645_TRIGGER_INTERVAL_MS = 5000;  // 5秒间隔
 
 // DL/T 645-2007 数据标识符枚举定义
 enum class DLT645_DATA_IDENTIFIER : uint32_t {
@@ -70,7 +70,7 @@ const EventBits_t ALL_DLT645_EVENTS = EVENT_DI_DEVICE_ADDRESS | EVENT_DI_ACTIVE_
 const EventBits_t ALL_EVENTS = EVENT_GENERAL | ALL_DLT645_EVENTS;
 #endif
 
-class HelloWorldComponent : public Component {
+class DLT645Component : public Component {
  public:
   void setup() override;
   void loop() override;
@@ -122,10 +122,10 @@ class HelloWorldComponent : public Component {
   void trigger_hello_world_event();
   
   // FreeRTOS任务相关方法
-  bool create_hello_world_task();
-  void destroy_hello_world_task();
-  static void hello_world_task_func(void* parameter);
-  void process_hello_world_events();
+  bool create_dlt645_task();
+  void destroy_dlt645_task();
+  static void dlt645_task_func(void* parameter);
+  void process_dlt645_events();
   
   // === DL/T 645-2007 UART通信相关方法 ===
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
@@ -179,7 +179,7 @@ class HelloWorldComponent : public Component {
   
   // FreeRTOS任务和事件组
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
-  TaskHandle_t hello_world_task_handle_{nullptr};
+  TaskHandle_t dlt645_task_handle_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
   bool task_running_{false};
 #endif
@@ -249,7 +249,7 @@ class HelloWorldComponent : public Component {
 // 原有的通用触发器（保持向后兼容）
 class HelloWorldTrigger : public Trigger<uint32_t> {
  public:
-  explicit HelloWorldTrigger(HelloWorldComponent *parent) {
+  explicit HelloWorldTrigger(DLT645Component *parent) {
     parent->add_on_hello_world_callback([this](uint32_t magic_number) {
       this->trigger(magic_number);
     });
@@ -259,7 +259,7 @@ class HelloWorldTrigger : public Trigger<uint32_t> {
 // DL/T 645-2007 数据标识符独立事件触发器类
 class DeviceAddressTrigger : public Trigger<uint32_t> {
  public:
-  explicit DeviceAddressTrigger(HelloWorldComponent *parent) {
+  explicit DeviceAddressTrigger(DLT645Component *parent) {
     parent->add_on_device_address_callback([this](uint32_t data_identifier) {
       this->trigger(data_identifier);
     });
@@ -268,7 +268,7 @@ class DeviceAddressTrigger : public Trigger<uint32_t> {
 
 class ActivePowerTrigger : public Trigger<uint32_t, float> {
  public:
-  explicit ActivePowerTrigger(HelloWorldComponent *parent) {
+  explicit ActivePowerTrigger(DLT645Component *parent) {
     parent->add_on_active_power_callback([this](uint32_t data_identifier, float power_watts) {
       this->trigger(data_identifier, power_watts);  // power_watts 以W为单位传递
     });
@@ -277,7 +277,7 @@ class ActivePowerTrigger : public Trigger<uint32_t, float> {
 
 class EnergyActiveTrigger : public Trigger<uint32_t, float> {
  public:
-  explicit EnergyActiveTrigger(HelloWorldComponent *parent) {
+  explicit EnergyActiveTrigger(DLT645Component *parent) {
     parent->add_on_energy_active_callback([this](uint32_t data_identifier, float energy_kwh) {
       this->trigger(data_identifier, energy_kwh);
     });
@@ -286,7 +286,7 @@ class EnergyActiveTrigger : public Trigger<uint32_t, float> {
 
 class VoltageATrigger : public Trigger<uint32_t, float> {
  public:
-  explicit VoltageATrigger(HelloWorldComponent *parent) {
+  explicit VoltageATrigger(DLT645Component *parent) {
     parent->add_on_voltage_a_callback([this](uint32_t data_identifier, float voltage_v) {
       this->trigger(data_identifier, voltage_v);
     });
@@ -295,7 +295,7 @@ class VoltageATrigger : public Trigger<uint32_t, float> {
 
 class CurrentATrigger : public Trigger<uint32_t, float> {
  public:
-  explicit CurrentATrigger(HelloWorldComponent *parent) {
+  explicit CurrentATrigger(DLT645Component *parent) {
     parent->add_on_current_a_callback([this](uint32_t data_identifier, float current_a) {
       this->trigger(data_identifier, current_a);
     });
@@ -304,7 +304,7 @@ class CurrentATrigger : public Trigger<uint32_t, float> {
 
 class PowerFactorTrigger : public Trigger<uint32_t, float> {
  public:
-  explicit PowerFactorTrigger(HelloWorldComponent *parent) {
+  explicit PowerFactorTrigger(DLT645Component *parent) {
     parent->add_on_power_factor_callback([this](uint32_t data_identifier, float power_factor) {
       this->trigger(data_identifier, power_factor);
     });
@@ -313,7 +313,7 @@ class PowerFactorTrigger : public Trigger<uint32_t, float> {
 
 class FrequencyTrigger : public Trigger<uint32_t, float> {
  public:
-  explicit FrequencyTrigger(HelloWorldComponent *parent) {
+  explicit FrequencyTrigger(DLT645Component *parent) {
     parent->add_on_frequency_callback([this](uint32_t data_identifier, float frequency_hz) {
       this->trigger(data_identifier, frequency_hz);
     });
@@ -322,7 +322,7 @@ class FrequencyTrigger : public Trigger<uint32_t, float> {
 
 class EnergyReverseTrigger : public Trigger<uint32_t, float> {
  public:
-  explicit EnergyReverseTrigger(HelloWorldComponent *parent) {
+  explicit EnergyReverseTrigger(DLT645Component *parent) {
     parent->add_on_energy_reverse_callback([this](uint32_t data_identifier, float energy_reverse_kwh) {
       this->trigger(data_identifier, energy_reverse_kwh);
     });
@@ -331,7 +331,7 @@ class EnergyReverseTrigger : public Trigger<uint32_t, float> {
 
 class DatetimeTrigger : public Trigger<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> {
  public:
-  explicit DatetimeTrigger(HelloWorldComponent *parent) {
+  explicit DatetimeTrigger(DLT645Component *parent) {
     parent->add_on_datetime_callback([this](uint32_t data_identifier, uint32_t year, uint32_t month, uint32_t day, uint32_t weekday) {
       this->trigger(data_identifier, year, month, day, weekday);
     });
@@ -340,12 +340,12 @@ class DatetimeTrigger : public Trigger<uint32_t, uint32_t, uint32_t, uint32_t, u
 
 class TimeHmsTrigger : public Trigger<uint32_t, uint32_t, uint32_t, uint32_t> {
  public:
-  explicit TimeHmsTrigger(HelloWorldComponent *parent) {
+  explicit TimeHmsTrigger(DLT645Component *parent) {
     parent->add_on_time_hms_callback([this](uint32_t data_identifier, uint32_t hour, uint32_t minute, uint32_t second) {
       this->trigger(data_identifier, hour, minute, second);
     });
   }
 };
 
-}  // namespace hello_world_component
+}  // namespace dlt645_component
 }  // namespace esphome
