@@ -14,6 +14,7 @@
 #endif
 
 #include <vector>
+#include <string>
 #include <cstring>
 #include <functional>
 #include <algorithm>
@@ -78,28 +79,28 @@ class HelloWorldComponent : public Component {
   void add_on_active_power_callback(std::function<void(uint32_t, float)> &&callback) {
     this->active_power_callback_.add(std::move(callback));
   }
-  void add_on_energy_active_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_energy_active_callback(std::function<void(uint32_t, float)> &&callback) {
     this->energy_active_callback_.add(std::move(callback));
   }
-  void add_on_voltage_a_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_voltage_a_callback(std::function<void(uint32_t, float)> &&callback) {
     this->voltage_a_callback_.add(std::move(callback));
   }
-  void add_on_current_a_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_current_a_callback(std::function<void(uint32_t, float)> &&callback) {
     this->current_a_callback_.add(std::move(callback));
   }
-  void add_on_power_factor_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_power_factor_callback(std::function<void(uint32_t, float)> &&callback) {
     this->power_factor_callback_.add(std::move(callback));
   }
-  void add_on_frequency_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_frequency_callback(std::function<void(uint32_t, float)> &&callback) {
     this->frequency_callback_.add(std::move(callback));
   }
-  void add_on_energy_reverse_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_energy_reverse_callback(std::function<void(uint32_t, float)> &&callback) {
     this->energy_reverse_callback_.add(std::move(callback));
   }
-  void add_on_datetime_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_datetime_callback(std::function<void(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)> &&callback) {
     this->datetime_callback_.add(std::move(callback));
   }
-  void add_on_time_hms_callback(std::function<void(uint32_t)> &&callback) {
+  void add_on_time_hms_callback(std::function<void(uint32_t, uint32_t, uint32_t, uint32_t)> &&callback) {
     this->time_hms_callback_.add(std::move(callback));
   }
 
@@ -153,14 +154,14 @@ class HelloWorldComponent : public Component {
   // DL/T 645-2007 数据标识符独立事件回调管理器
   CallbackManager<void(uint32_t)> device_address_callback_;    // 设备地址查询
   CallbackManager<void(uint32_t, float)> active_power_callback_;      // 总功率
-  CallbackManager<void(uint32_t)> energy_active_callback_;     // 总电能
-  CallbackManager<void(uint32_t)> voltage_a_callback_;         // A相电压
-  CallbackManager<void(uint32_t)> current_a_callback_;         // A相电流
-  CallbackManager<void(uint32_t)> power_factor_callback_;      // 功率因数
-  CallbackManager<void(uint32_t)> frequency_callback_;         // 频率
-  CallbackManager<void(uint32_t)> energy_reverse_callback_;    // 反向总电能
-  CallbackManager<void(uint32_t)> datetime_callback_;          // 日期时间
-  CallbackManager<void(uint32_t)> time_hms_callback_;          // 时分秒
+  CallbackManager<void(uint32_t, float)> energy_active_callback_;     // 总电能
+  CallbackManager<void(uint32_t, float)> voltage_a_callback_;         // A相电压
+  CallbackManager<void(uint32_t, float)> current_a_callback_;         // A相电流
+  CallbackManager<void(uint32_t, float)> power_factor_callback_;      // 功率因数
+  CallbackManager<void(uint32_t, float)> frequency_callback_;         // 频率
+  CallbackManager<void(uint32_t, float)> energy_reverse_callback_;    // 反向总电能
+  CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)> datetime_callback_;          // 日期时间 (DI, year, month, day, weekday)
+  CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t)> time_hms_callback_;          // 时分秒 (DI, hour, minute, second)
   
   // FreeRTOS任务和事件组
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
@@ -219,6 +220,17 @@ class HelloWorldComponent : public Component {
   std::string cached_datetime_str_{""};          // 日期时间字符串
   std::string cached_time_hms_str_{""};          // 时分秒字符串
   
+  // 日期时间数值缓存
+  uint32_t cached_year_{0};                      // 年
+  uint32_t cached_month_{0};                     // 月
+  uint32_t cached_day_{0};                       // 日
+  uint32_t cached_weekday_{0};                   // 星期 (1-7)
+  
+  // 时分秒数值缓存
+  uint32_t cached_hour_{0};                      // 时
+  uint32_t cached_minute_{0};                    // 分
+  uint32_t cached_second_{0};                    // 秒
+  
   // 数据标识符缓存（用于callback传递）
   uint32_t cached_data_identifier_{0};
 };
@@ -252,74 +264,74 @@ class ActivePowerTrigger : public Trigger<uint32_t, float> {
   }
 };
 
-class EnergyActiveTrigger : public Trigger<uint32_t> {
+class EnergyActiveTrigger : public Trigger<uint32_t, float> {
  public:
   explicit EnergyActiveTrigger(HelloWorldComponent *parent) {
-    parent->add_on_energy_active_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_energy_active_callback([this](uint32_t data_identifier, float energy_kwh) {
+      this->trigger(data_identifier, energy_kwh);
     });
   }
 };
 
-class VoltageATrigger : public Trigger<uint32_t> {
+class VoltageATrigger : public Trigger<uint32_t, float> {
  public:
   explicit VoltageATrigger(HelloWorldComponent *parent) {
-    parent->add_on_voltage_a_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_voltage_a_callback([this](uint32_t data_identifier, float voltage_v) {
+      this->trigger(data_identifier, voltage_v);
     });
   }
 };
 
-class CurrentATrigger : public Trigger<uint32_t> {
+class CurrentATrigger : public Trigger<uint32_t, float> {
  public:
   explicit CurrentATrigger(HelloWorldComponent *parent) {
-    parent->add_on_current_a_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_current_a_callback([this](uint32_t data_identifier, float current_a) {
+      this->trigger(data_identifier, current_a);
     });
   }
 };
 
-class PowerFactorTrigger : public Trigger<uint32_t> {
+class PowerFactorTrigger : public Trigger<uint32_t, float> {
  public:
   explicit PowerFactorTrigger(HelloWorldComponent *parent) {
-    parent->add_on_power_factor_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_power_factor_callback([this](uint32_t data_identifier, float power_factor) {
+      this->trigger(data_identifier, power_factor);
     });
   }
 };
 
-class FrequencyTrigger : public Trigger<uint32_t> {
+class FrequencyTrigger : public Trigger<uint32_t, float> {
  public:
   explicit FrequencyTrigger(HelloWorldComponent *parent) {
-    parent->add_on_frequency_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_frequency_callback([this](uint32_t data_identifier, float frequency_hz) {
+      this->trigger(data_identifier, frequency_hz);
     });
   }
 };
 
-class EnergyReverseTrigger : public Trigger<uint32_t> {
+class EnergyReverseTrigger : public Trigger<uint32_t, float> {
  public:
   explicit EnergyReverseTrigger(HelloWorldComponent *parent) {
-    parent->add_on_energy_reverse_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_energy_reverse_callback([this](uint32_t data_identifier, float energy_reverse_kwh) {
+      this->trigger(data_identifier, energy_reverse_kwh);
     });
   }
 };
 
-class DatetimeTrigger : public Trigger<uint32_t> {
+class DatetimeTrigger : public Trigger<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> {
  public:
   explicit DatetimeTrigger(HelloWorldComponent *parent) {
-    parent->add_on_datetime_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_datetime_callback([this](uint32_t data_identifier, uint32_t year, uint32_t month, uint32_t day, uint32_t weekday) {
+      this->trigger(data_identifier, year, month, day, weekday);
     });
   }
 };
 
-class TimeHmsTrigger : public Trigger<uint32_t> {
+class TimeHmsTrigger : public Trigger<uint32_t, uint32_t, uint32_t, uint32_t> {
  public:
   explicit TimeHmsTrigger(HelloWorldComponent *parent) {
-    parent->add_on_time_hms_callback([this](uint32_t data_identifier) {
-      this->trigger(data_identifier);
+    parent->add_on_time_hms_callback([this](uint32_t data_identifier, uint32_t hour, uint32_t minute, uint32_t second) {
+      this->trigger(data_identifier, hour, minute, second);
     });
   }
 };

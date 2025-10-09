@@ -47,28 +47,28 @@ ActivePowerTrigger = hello_world_component_ns.class_(
     "ActivePowerTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 EnergyActiveTrigger = hello_world_component_ns.class_(
-    "EnergyActiveTrigger", automation.Trigger.template(cg.uint32)
+    "EnergyActiveTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 VoltageATrigger = hello_world_component_ns.class_(
-    "VoltageATrigger", automation.Trigger.template(cg.uint32)
+    "VoltageATrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 CurrentATrigger = hello_world_component_ns.class_(
-    "CurrentATrigger", automation.Trigger.template(cg.uint32)
+    "CurrentATrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 PowerFactorTrigger = hello_world_component_ns.class_(
-    "PowerFactorTrigger", automation.Trigger.template(cg.uint32)
+    "PowerFactorTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 FrequencyTrigger = hello_world_component_ns.class_(
-    "FrequencyTrigger", automation.Trigger.template(cg.uint32)
+    "FrequencyTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 EnergyReverseTrigger = hello_world_component_ns.class_(
-    "EnergyReverseTrigger", automation.Trigger.template(cg.uint32)
+    "EnergyReverseTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 DatetimeTrigger = hello_world_component_ns.class_(
-    "DatetimeTrigger", automation.Trigger.template(cg.uint32)
+    "DatetimeTrigger", automation.Trigger.template(cg.uint32, cg.uint32, cg.uint32, cg.uint32, cg.uint32)
 )
 TimeHmsTrigger = hello_world_component_ns.class_(
-    "TimeHmsTrigger", automation.Trigger.template(cg.uint32)
+    "TimeHmsTrigger", automation.Trigger.template(cg.uint32, cg.uint32, cg.uint32, cg.uint32)
 )
 
 # 组件配置架构
@@ -114,26 +114,41 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ON_POWER_FACTOR): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(PowerFactorTrigger),
+                cv.Optional("data_identifier"): cv.uint32_t,
+                cv.Optional("power_factor"): cv.float_,
             }
         ),
         cv.Optional(CONF_ON_FREQUENCY): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(FrequencyTrigger),
+                cv.Optional("data_identifier"): cv.uint32_t,
+                cv.Optional("frequency_hz"): cv.float_,
             }
         ),
         cv.Optional(CONF_ON_ENERGY_REVERSE): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(EnergyReverseTrigger),
+                cv.Optional("data_identifier"): cv.uint32_t,
+                cv.Optional("energy_reverse_kwh"): cv.float_,
             }
         ),
         cv.Optional(CONF_ON_DATETIME): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(DatetimeTrigger),
+                cv.Optional("data_identifier"): cv.uint32_t,
+                cv.Optional("year"): cv.uint32_t,
+                cv.Optional("month"): cv.uint32_t,
+                cv.Optional("day"): cv.uint32_t,
+                cv.Optional("weekday"): cv.uint32_t,
             }
         ),
         cv.Optional(CONF_ON_TIME_HMS): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(TimeHmsTrigger),
+                cv.Optional("data_identifier"): cv.uint32_t,
+                cv.Optional("hour"): cv.uint32_t,
+                cv.Optional("minute"): cv.uint32_t,
+                cv.Optional("second"): cv.uint32_t,
             }
         ),
     }
@@ -169,42 +184,42 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_watts")], conf)
     
-    # 总电能事件 (DI: 0x00010000)
+    # 总电能事件 (DI: 0x00010000) - 双参数：data_identifier + energy_kwh (单位: kWh)
     for conf in config.get(CONF_ON_ENERGY_ACTIVE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "energy_kwh")], conf)
     
-    # A相电压事件 (DI: 0x02010100)
+    # A相电压事件 (DI: 0x02010100) - 双参数：data_identifier + voltage_v (单位: V)
     for conf in config.get(CONF_ON_VOLTAGE_A, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "voltage_v")], conf)
     
-    # A相电流事件 (DI: 0x02020100)
+    # A相电流事件 (DI: 0x02020100) - 双参数：data_identifier + current_a (单位: A)
     for conf in config.get(CONF_ON_CURRENT_A, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "current_a")], conf)
     
     # 功率因数事件 (DI: 0x02060000)
     for conf in config.get(CONF_ON_POWER_FACTOR, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_factor")], conf)
     
     # 频率事件 (DI: 0x02800002)
     for conf in config.get(CONF_ON_FREQUENCY, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "frequency_hz")], conf)
     
     # 反向总电能事件 (DI: 0x00020000)
     for conf in config.get(CONF_ON_ENERGY_REVERSE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "energy_reverse_kwh")], conf)
     
     # 日期时间事件 (DI: 0x04000101)
     for conf in config.get(CONF_ON_DATETIME, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.uint32, "year"), (cg.uint32, "month"), (cg.uint32, "day"), (cg.uint32, "weekday")], conf)
     
     # 时分秒事件 (DI: 0x04000102)
     for conf in config.get(CONF_ON_TIME_HMS, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.uint32, "hour"), (cg.uint32, "minute"), (cg.uint32, "second")], conf)

@@ -149,7 +149,6 @@ bool HelloWorldComponent::create_hello_world_task() {
     return false;
   }
   
-  ESP_LOGI(TAG, "✅ FreeRTOS任务创建成功，句柄: %p", this->hello_world_task_handle_);
   return true;
 }
 
@@ -178,8 +177,6 @@ void HelloWorldComponent::destroy_hello_world_task() {
   
   // === 清理DL/T 645 UART资源 ===
   this->deinit_dlt645_uart();
-  
-  ESP_LOGI(TAG, "✅ FreeRTOS任务已销毁");
 }
 
 // Static task function - runs in independent FreeRTOS task
@@ -246,7 +243,7 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
       uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
       const char* event_name = dlt645_event_names[current_event_index];
       
-      ESP_LOGI(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name, data_identifier);
+      ESP_LOGD(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name, data_identifier);
       
       // 根据当前数据标识符选择相应的查询函数
       bool send_success = false;
@@ -287,8 +284,6 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
     // 任务延迟 - 释放CPU给其他任务
     vTaskDelay(pdMS_TO_TICKS(5));  // 10ms延迟，提高响应性
   }
-  
-  ESP_LOGI(TAG, "🛑 FreeRTOS任务即将退出");
   
   // 任务清理并自我删除
   component->hello_world_task_handle_ = nullptr;
@@ -357,35 +352,35 @@ void HelloWorldComponent::process_hello_world_events() {
           break;
         case EVENT_DI_ENERGY_ACTIVE_TOTAL:
           ESP_LOGD(TAG, "🔋 传递总电能值: %.2f kWh", this->cached_energy_active_kwh_);
-          this->energy_active_callback_.call(this->cached_data_identifier_);
+          this->energy_active_callback_.call(this->cached_data_identifier_, this->cached_energy_active_kwh_);
           break;
         case EVENT_DI_VOLTAGE_A_PHASE:
           ESP_LOGD(TAG, "🔌 传递A相电压值: %.1f V", this->cached_voltage_a_v_);
-          this->voltage_a_callback_.call(this->cached_data_identifier_);
+          this->voltage_a_callback_.call(this->cached_data_identifier_, this->cached_voltage_a_v_);
           break;
         case EVENT_DI_CURRENT_A_PHASE:
           ESP_LOGD(TAG, "🔄 传递A相电流值: %.3f A", this->cached_current_a_a_);
-          this->current_a_callback_.call(this->cached_data_identifier_);
+          this->current_a_callback_.call(this->cached_data_identifier_, this->cached_current_a_a_);
           break;
         case EVENT_DI_POWER_FACTOR_TOTAL:
           ESP_LOGD(TAG, "📈 传递功率因数值: %.3f", this->cached_power_factor_);
-          this->power_factor_callback_.call(this->cached_data_identifier_);
+          this->power_factor_callback_.call(this->cached_data_identifier_, this->cached_power_factor_);
           break;
         case EVENT_DI_FREQUENCY:
           ESP_LOGD(TAG, "🌊 传递频率值: %.2f Hz", this->cached_frequency_hz_);
-          this->frequency_callback_.call(this->cached_data_identifier_);
+          this->frequency_callback_.call(this->cached_data_identifier_, this->cached_frequency_hz_);
           break;
         case EVENT_DI_ENERGY_REVERSE_TOTAL:
           ESP_LOGD(TAG, "🔄 传递反向电能值: %.2f kWh", this->cached_energy_reverse_kwh_);
-          this->energy_reverse_callback_.call(this->cached_data_identifier_);
+          this->energy_reverse_callback_.call(this->cached_data_identifier_, this->cached_energy_reverse_kwh_);
           break;
         case EVENT_DI_DATETIME:
-          ESP_LOGD(TAG, "📅 传递日期时间: %s", this->cached_datetime_str_.c_str());
-          this->datetime_callback_.call(this->cached_data_identifier_);
+          ESP_LOGD(TAG, "📅 传递日期时间: %04u-%02u-%02u 星期%u", this->cached_year_, this->cached_month_, this->cached_day_, this->cached_weekday_);
+          this->datetime_callback_.call(this->cached_data_identifier_, this->cached_year_, this->cached_month_, this->cached_day_, this->cached_weekday_);
           break;
         case EVENT_DI_TIME_HMS:
-          ESP_LOGD(TAG, "⏰ 传递时分秒: %s", this->cached_time_hms_str_.c_str());
-          this->time_hms_callback_.call(this->cached_data_identifier_);
+          ESP_LOGD(TAG, "⏰ 传递时分秒: %02u:%02u:%02u", this->cached_hour_, this->cached_minute_, this->cached_second_);
+          this->time_hms_callback_.call(this->cached_data_identifier_, this->cached_hour_, this->cached_minute_, this->cached_second_);
           break;
         default:
           ESP_LOGW(TAG, "⚠️ 未知事件位: 0x%08X", dlt645_events[i].bit);
@@ -455,10 +450,10 @@ bool HelloWorldComponent::init_dlt645_uart() {
 
 void HelloWorldComponent::deinit_dlt645_uart() {
   if (this->uart_initialized_) {
-    ESP_LOGI(TAG, "🧹 反初始化DL/T 645 UART...");
+    ESP_LOGD(TAG, "🧹 反初始化DL/T 645 UART...");
     uart_driver_delete(this->uart_port_);
     this->uart_initialized_ = false;
-    ESP_LOGI(TAG, "✅ UART已反初始化");
+    ESP_LOGD(TAG, "✅ UART已反初始化");
   }
 }
 
@@ -514,7 +509,7 @@ bool HelloWorldComponent::change_uart_baud_rate(int new_baud_rate) {
   
   this->uart_initialized_ = true;
   
-  ESP_LOGI(TAG, "✅ DL/T 645 UART波特率切换成功: %d", new_baud_rate);
+  ESP_LOGW(TAG, "✅ DL/T 645 UART波特率切换成功: %d", new_baud_rate);
   return true;
 }
 
@@ -526,7 +521,7 @@ void HelloWorldComponent::cycle_to_next_baud_rate() {
   this->current_baud_rate_index_ = (this->current_baud_rate_index_ + 1) % this->baud_rate_list_.size();
   int next_baud_rate = this->baud_rate_list_[this->current_baud_rate_index_];
   
-  ESP_LOGI(TAG, "🔄 设备发现超时，从 %d 切换到下一个波特率: %d (索引: %d/%d)", 
+  ESP_LOGW(TAG, "从 %d 切换到下一个波特率: %d (索引: %d/%d)", 
            current_baud_rate, next_baud_rate, this->current_baud_rate_index_, this->baud_rate_list_.size());
   
   // 执行波特率切换
@@ -590,7 +585,8 @@ void HelloWorldComponent::process_uart_data() {
   
   // === 第1步: 使用current_command_timeout_ms_进行首次读取，如果超时则处理命令超时 ===
   uint8_t data[256];
-  int bytes_read = uart_read_bytes(this->uart_port_, data, sizeof(data), pdMS_TO_TICKS(timeout_ms));
+  // timeout for first byte read
+  int bytes_read = uart_read_bytes(this->uart_port_, data, 1, pdMS_TO_TICKS(timeout_ms));
   
   if (bytes_read <= 0) {
     // 首次读取超时，说明当前命令超时了
@@ -604,7 +600,6 @@ void HelloWorldComponent::process_uart_data() {
     if (this->switch_baud_rate_when_failed_) {
       // 执行波特率切换
       this->cycle_to_next_baud_rate();
-      ESP_LOGW(TAG, "🔄 波特率切换完成，将在下次循环重试设备发现");
     }
     return;
   }
@@ -799,7 +794,7 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
     }
     if (address_changed) {
       this->meter_address_bytes_ = address;
-      ESP_LOGI(TAG, "📍 更新电表地址: %02X %02X %02X %02X %02X %02X", 
+      ESP_LOGW(TAG, "📍 更新电表地址: %02X %02X %02X %02X %02X %02X", 
            address[0], address[1], address[2], address[3], address[4], address[5]);
       this->device_address_discovered_ = true;
     }
@@ -935,7 +930,7 @@ bool HelloWorldComponent::discover_meter_address() {
     return false;
   }
   
-  ESP_LOGI(TAG, "🔍 开始DL/T 645电表地址发现...");
+  ESP_LOGD(TAG, "🔍 开始DL/T 645电表地址发现...");
   
   // 使用广播地址 99 99 99 99 99 99
   std::vector<uint8_t> broadcast_address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};
@@ -1036,7 +1031,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
   
   switch (data_identifier) {
     case 0x04000401: {  // 设备地址查询
-      ESP_LOGI(TAG, "🔍 [设备地址查询] 响应已接收");
+      ESP_LOGW(TAG, "🔍 [设备地址查询] 响应已接收");
       // 设备地址信息通常在帧的地址域中，这里主要确认查询成功
       
       // 保存数据标识符并设置事件位（线程安全）
@@ -1061,7 +1056,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 转换为W单位存储
         float power_w = power_kw * 1000.0f;
         
-        ESP_LOGI(TAG, "⚡ [总有功功率] %.1f W (%.4f kW)", power_w, power_kw);
+        ESP_LOGD(TAG, "⚡ [总有功功率] %.1f W (%.4f kW)", power_w, power_kw);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_active_power_w_ = power_w;
@@ -1080,7 +1075,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // DL/T 645电能格式：4字节BCD，XXXXXX.XX kWh (2位小数)
         float energy_kwh = bcd_to_float(actual_data, 2);
         
-        ESP_LOGI(TAG, "🔋 [正向有功总电能] %.2f kWh", energy_kwh);
+        ESP_LOGD(TAG, "🔋 [正向有功总电能] %.2f kWh", energy_kwh);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_energy_active_kwh_ = energy_kwh;
@@ -1099,7 +1094,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // DL/T 645电压格式：2字节BCD，XXX.X V (1位小数)
         float voltage_v = bcd_to_float(actual_data, 1);
         
-        ESP_LOGI(TAG, "🔌 [A相电压] %.1f V", voltage_v);
+        ESP_LOGD(TAG, "🔌 [A相电压] %.1f V", voltage_v);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_voltage_a_v_ = voltage_v;
@@ -1115,11 +1110,9 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
     
     case 0x02020100: {  // A相电流
       if (actual_data.size() >= 3) {
-        // DL/T 645电流格式：3字节BCD，XXX.XXX A (3位小数)
-        float current_a = bcd_to_float(actual_data, 3);
+        float current_a = bcd_to_float_with_sign(actual_data, 3);
         
-        ESP_LOGI(TAG, "🔄 [A相电流] %.3f A", current_a);
-        
+        ESP_LOGD(TAG, "🔄 [A相电流] %.3f A", current_a);
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_current_a_a_ = current_a;
         this->cached_data_identifier_ = data_identifier;
@@ -1135,9 +1128,9 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
     case 0x02060000: {  // 总功率因数
       if (actual_data.size() >= 2) {
         // DL/T 645功率因数格式：2字节BCD，X.XXX (3位小数)
-        float power_factor = bcd_to_float(actual_data, 3);
-        
-        ESP_LOGI(TAG, "📈 [总功率因数] %.3f", power_factor);
+        ESP_LOGD(TAG, "📊 总功率因数原始数据: %02X %02X", actual_data[0], actual_data[1]);
+        float power_factor = bcd_to_float_with_sign(actual_data, 3);
+        ESP_LOGD(TAG, "📈 [总功率因数] %.3f", power_factor);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_power_factor_ = power_factor;
@@ -1156,7 +1149,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // DL/T 645频率格式：2字节BCD，XX.XX Hz (2位小数)
         float frequency_hz = bcd_to_float(actual_data, 2);
         
-        ESP_LOGI(TAG, "🌊 [电网频率] %.2f Hz", frequency_hz);
+        ESP_LOGD(TAG, "🌊 [电网频率] %.2f Hz", frequency_hz);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_frequency_hz_ = frequency_hz;
@@ -1175,7 +1168,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // DL/T 645电能格式：4字节BCD，XXXXXX.XX kWh (2位小数)
         float energy_kwh = bcd_to_float(actual_data, 2);
         
-        ESP_LOGI(TAG, "🔄 [反向有功总电能] %.2f kWh", energy_kwh);
+        ESP_LOGD(TAG, "🔄 [反向有功总电能] %.2f kWh", energy_kwh);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_energy_reverse_kwh_ = energy_kwh;
@@ -1228,7 +1221,13 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
                      "%04d-%02d-%02d (星期%s)", 
                      full_year, month, day, weekdays[week_day]);
             
-            ESP_LOGI(TAG, "📅 [日期时间-4字节WDMY] %s", datetime_str);
+            ESP_LOGW(TAG, "📅 [日期时间-4字节WDMY] %s", datetime_str);
+            
+            // 保存数值到缓存变量
+            this->cached_year_ = full_year;
+            this->cached_month_ = month;
+            this->cached_day_ = day;
+            this->cached_weekday_ = week_day + 1;  // 转换为1-7 (1=星期一, 7=星期日)
         } else {
             // 数据无效，显示原始值
             snprintf(datetime_str, sizeof(datetime_str), 
@@ -1251,7 +1250,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
                  actual_data[1], actual_data[0], actual_data[2], actual_data[3], 
                  actual_data[4], actual_data[5]);
         
-        ESP_LOGI(TAG, "📅 [日期时间-6+字节] %s", datetime_str);
+        ESP_LOGD(TAG, "📅 [日期时间-6+字节] %s", datetime_str);
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_datetime_str_ = std::string(datetime_str);
@@ -1267,12 +1266,27 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
     
     case 0x04000102: {  // 时分秒
       if (actual_data.size() >= 3) {
+        // BCD转换lambda函数
+        auto bcd_to_byte = [](uint8_t bcd) -> int {
+            return ((bcd >> 4) & 0x0F) * 10 + (bcd & 0x0F);
+        };
+        
+        // 解析时分秒数值
+        int hour = bcd_to_byte(actual_data[0]);
+        int minute = bcd_to_byte(actual_data[1]);
+        int second = bcd_to_byte(actual_data[2]);
+        
         // 格式化时分秒字符串
         char time_hms_str[16];
-        snprintf(time_hms_str, sizeof(time_hms_str), "%02X时%02X分%02X秒", 
-                 actual_data[0], actual_data[1], actual_data[2]);
+        snprintf(time_hms_str, sizeof(time_hms_str), "%02d时%02d分%02d秒", 
+                 hour, minute, second);
         
-        ESP_LOGI(TAG, "⏰ [时分秒] %s", time_hms_str);
+        ESP_LOGW(TAG, "⏰ [时分秒] %s", time_hms_str);
+        
+        // 保存数值到缓存变量
+        this->cached_hour_ = hour;
+        this->cached_minute_ = minute;
+        this->cached_second_ = second;
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_time_hms_str_ = std::string(time_hms_str);
