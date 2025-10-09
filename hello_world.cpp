@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
+#include <cassert>
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
 #include "freertos/FreeRTOS.h"
@@ -64,11 +65,7 @@ void HelloWorldComponent::setup() {
   
   // 创建事件组用于任务间通信
   this->event_group_ = xEventGroupCreate();
-  if (this->event_group_ == nullptr) {
-    ESP_LOGE(TAG, "❌ 创建事件组失败");
-    this->mark_failed();
-    return;
-  }
+  assert(this->event_group_ != nullptr && "事件组创建失败");
   
   // 创建FreeRTOS任务
   if (!this->create_hello_world_task()) {
@@ -110,7 +107,7 @@ void HelloWorldComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Task Status: %s", this->task_running_ ? "运行中" : "已停止");
   ESP_LOGCONFIG(TAG, "  Task Stack Size: %lu 字节", (unsigned long)HELLO_WORLD_TASK_STACK_SIZE);
   ESP_LOGCONFIG(TAG, "  Task Priority: %d", (int)HELLO_WORLD_TASK_PRIORITY);
-  ESP_LOGCONFIG(TAG, "  Event Group: %s", this->event_group_ ? "已创建" : "未创建");
+  ESP_LOGCONFIG(TAG, "  Event Group: 已创建");
   ESP_LOGCONFIG(TAG, "  DL/T 645 超时配置:");
   ESP_LOGCONFIG(TAG, "    - 一般命令超时: %lu ms", (unsigned long)this->frame_timeout_ms_);
   ESP_LOGCONFIG(TAG, "    - 设备发现超时: %lu ms", (unsigned long)this->device_discovery_timeout_ms_);
@@ -170,10 +167,8 @@ void HelloWorldComponent::destroy_hello_world_task() {
   }
   
   // 删除事件组
-  if (this->event_group_ != nullptr) {
-    vEventGroupDelete(this->event_group_);
-    this->event_group_ = nullptr;
-  }
+  vEventGroupDelete(this->event_group_);
+  this->event_group_ = nullptr;
   
   // === 清理DL/T 645 UART资源 ===
   this->deinit_dlt645_uart();
@@ -291,10 +286,6 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
 }
 
 void HelloWorldComponent::process_hello_world_events() {
-  if (this->event_group_ == nullptr) {
-    return;
-  }
-  
   // 非阻塞地检查事件组中的事件位
   EventBits_t event_bits = xEventGroupWaitBits(
     this->event_group_,     // 事件组句柄
@@ -1036,9 +1027,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       
       // 保存数据标识符并设置事件位（线程安全）
       this->cached_data_identifier_ = data_identifier;
-      if (this->event_group_ != nullptr) {
-        xEventGroupSetBits(this->event_group_, EVENT_DI_DEVICE_ADDRESS);
-      }
+      xEventGroupSetBits(this->event_group_, EVENT_DI_DEVICE_ADDRESS);
       break;
     }
     
@@ -1061,9 +1050,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_active_power_w_ = power_w;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_ACTIVE_POWER_TOTAL);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_ACTIVE_POWER_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 总有功功率数据长度不足");
       }
@@ -1080,9 +1067,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_energy_active_kwh_ = energy_kwh;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_ENERGY_ACTIVE_TOTAL);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_ENERGY_ACTIVE_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 正向有功总电能数据长度不足");
       }
@@ -1099,9 +1084,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_voltage_a_v_ = voltage_v;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_VOLTAGE_A_PHASE);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_VOLTAGE_A_PHASE);
       } else {
         ESP_LOGW(TAG, "⚠️ A相电压数据长度不足");
       }
@@ -1116,9 +1099,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_current_a_a_ = current_a;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_CURRENT_A_PHASE);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_CURRENT_A_PHASE);
       } else {
         ESP_LOGW(TAG, "⚠️ A相电流数据长度不足");
       }
@@ -1135,9 +1116,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_power_factor_ = power_factor;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_POWER_FACTOR_TOTAL);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_POWER_FACTOR_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 总功率因数数据长度不足");
       }
@@ -1154,9 +1133,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_frequency_hz_ = frequency_hz;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_FREQUENCY);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_FREQUENCY);
       } else {
         ESP_LOGW(TAG, "⚠️ 电网频率数据长度不足");
       }
@@ -1173,9 +1150,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_energy_reverse_kwh_ = energy_kwh;
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_ENERGY_REVERSE_TOTAL);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_ENERGY_REVERSE_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 反向有功总电能数据长度不足");
       }
@@ -1190,7 +1165,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         sprintf(hex, "%02X ", actual_data[i]);
         hex_str += hex;
       }
-      ESP_LOGI(TAG, "📊 日期时间原始数据 (%d字节): %s", actual_data.size(), hex_str.c_str());
+      ESP_LOGD(TAG, "📊 日期时间原始数据 (%d字节): %s", actual_data.size(), hex_str.c_str());
       
       if (actual_data.size() == 4) {
         // 4字节格式 WDMY - 根据用户分析：星期-日-月-年
@@ -1221,7 +1196,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
                      "%04d-%02d-%02d (星期%s)", 
                      full_year, month, day, weekdays[week_day]);
             
-            ESP_LOGW(TAG, "📅 [日期时间-4字节WDMY] %s", datetime_str);
+            ESP_LOGD(TAG, "📅 [日期时间-4字节WDMY] %s", datetime_str);
             
             // 保存数值到缓存变量
             this->cached_year_ = full_year;
@@ -1239,9 +1214,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_datetime_str_ = std::string(datetime_str);
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_DATETIME);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_DATETIME);
       } else if (actual_data.size() >= 6) {
         // 6字节或更多字节格式：DL/T 645-2007 标准格式
         // 格式化日期时间字符串
@@ -1255,9 +1228,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_datetime_str_ = std::string(datetime_str);
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_DATETIME);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_DATETIME);
       } else {
         ESP_LOGW(TAG, "❌ 日期时间数据长度异常: %d 字节 - 原始数据: %s", actual_data.size(), hex_str.c_str());
       }
@@ -1281,7 +1252,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         snprintf(time_hms_str, sizeof(time_hms_str), "%02d时%02d分%02d秒", 
                  hour, minute, second);
         
-        ESP_LOGW(TAG, "⏰ [时分秒] %s", time_hms_str);
+        ESP_LOGD(TAG, "⏰ [时分秒] %s", time_hms_str);
         
         // 保存数值到缓存变量
         this->cached_hour_ = hour;
@@ -1291,9 +1262,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_time_hms_str_ = std::string(time_hms_str);
         this->cached_data_identifier_ = data_identifier;
-        if (this->event_group_ != nullptr) {
-          xEventGroupSetBits(this->event_group_, EVENT_DI_TIME_HMS);
-        }
+        xEventGroupSetBits(this->event_group_, EVENT_DI_TIME_HMS);
       } else {
         ESP_LOGW(TAG, "⚠️ 时分秒数据长度不足");
       }
