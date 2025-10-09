@@ -211,16 +211,16 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
   };
   
   const uint32_t dlt645_data_identifiers[] = {
-    0x04000401,  // 设备地址查询
-    0x02030000,  // 总功率
-    0x00010000,  // 总电能
-    0x02010100,  // A相电压
-    0x02020100,  // A相电流
-    0x02060000,  // 功率因数
-    0x02800002,  // 频率
-    0x00020000,  // 反向总电能
-    0x04000101,  // 日期时间
-    0x04000102   // 时分秒
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS),      // 设备地址查询
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL),  // 总功率
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_ACTIVE_TOTAL), // 总电能
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::VOLTAGE_A_PHASE),     // A相电压
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::CURRENT_A_PHASE),     // A相电流
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::POWER_FACTOR_TOTAL),  // 功率因数
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::FREQUENCY),           // 频率
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_REVERSE_TOTAL), // 反向总电能
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::DATETIME),            // 日期时间
+    static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::TIME_HMS)             // 时分秒
   };
   
   const size_t num_dlt645_events = sizeof(dlt645_event_bits) / sizeof(dlt645_event_bits[0]);
@@ -240,9 +240,12 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
       
       ESP_LOGD(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name, data_identifier);
       
+      // 将data_identifier转换为枚举类型，简化后续代码
+      auto di_enum = static_cast<DLT645_DATA_IDENTIFIER>(data_identifier);
+      
       // 根据当前数据标识符选择相应的查询函数
       bool send_success = false;
-      if (data_identifier == 0x04000401) {
+      if (di_enum == DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS) {
         // 设备地址查询
         component->switch_baud_rate_when_failed_ = true;
 #if 0
@@ -251,7 +254,7 @@ void HelloWorldComponent::hello_world_task_func(void* parameter)
         //use power query to discover address
         send_success = component->query_active_power_total();
 #endif
-      } else if (data_identifier == 0x02030000) {
+      } else if (di_enum == DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL) {
         // 总有功功率查询
         component->switch_baud_rate_when_failed_ = false;
         send_success = component->query_active_power_total();
@@ -335,43 +338,43 @@ void HelloWorldComponent::process_hello_world_events() {
       // 根据事件位调用对应的独立回调函数
       switch (dlt645_events[i].bit) {
         case EVENT_DI_DEVICE_ADDRESS:
-          this->device_address_callback_.call(this->cached_data_identifier_);
+          this->device_address_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS));
           break;
         case EVENT_DI_ACTIVE_POWER_TOTAL:
           ESP_LOGD(TAG, "📊 传递功率值: %.1f W", this->cached_active_power_w_);
-          this->active_power_callback_.call(this->cached_data_identifier_, this->cached_active_power_w_);
+          this->active_power_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL), this->cached_active_power_w_);
           break;
         case EVENT_DI_ENERGY_ACTIVE_TOTAL:
           ESP_LOGD(TAG, "🔋 传递总电能值: %.2f kWh", this->cached_energy_active_kwh_);
-          this->energy_active_callback_.call(this->cached_data_identifier_, this->cached_energy_active_kwh_);
+          this->energy_active_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_ACTIVE_TOTAL), this->cached_energy_active_kwh_);
           break;
         case EVENT_DI_VOLTAGE_A_PHASE:
           ESP_LOGD(TAG, "🔌 传递A相电压值: %.1f V", this->cached_voltage_a_v_);
-          this->voltage_a_callback_.call(this->cached_data_identifier_, this->cached_voltage_a_v_);
+          this->voltage_a_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::VOLTAGE_A_PHASE), this->cached_voltage_a_v_);
           break;
         case EVENT_DI_CURRENT_A_PHASE:
           ESP_LOGD(TAG, "🔄 传递A相电流值: %.3f A", this->cached_current_a_a_);
-          this->current_a_callback_.call(this->cached_data_identifier_, this->cached_current_a_a_);
+          this->current_a_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::CURRENT_A_PHASE), this->cached_current_a_a_);
           break;
         case EVENT_DI_POWER_FACTOR_TOTAL:
           ESP_LOGD(TAG, "📈 传递功率因数值: %.3f", this->cached_power_factor_);
-          this->power_factor_callback_.call(this->cached_data_identifier_, this->cached_power_factor_);
+          this->power_factor_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::POWER_FACTOR_TOTAL), this->cached_power_factor_);
           break;
         case EVENT_DI_FREQUENCY:
           ESP_LOGD(TAG, "🌊 传递频率值: %.2f Hz", this->cached_frequency_hz_);
-          this->frequency_callback_.call(this->cached_data_identifier_, this->cached_frequency_hz_);
+          this->frequency_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::FREQUENCY), this->cached_frequency_hz_);
           break;
         case EVENT_DI_ENERGY_REVERSE_TOTAL:
           ESP_LOGD(TAG, "🔄 传递反向电能值: %.2f kWh", this->cached_energy_reverse_kwh_);
-          this->energy_reverse_callback_.call(this->cached_data_identifier_, this->cached_energy_reverse_kwh_);
+          this->energy_reverse_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_REVERSE_TOTAL), this->cached_energy_reverse_kwh_);
           break;
         case EVENT_DI_DATETIME:
           ESP_LOGD(TAG, "📅 传递日期时间: %04u-%02u-%02u 星期%u", this->cached_year_, this->cached_month_, this->cached_day_, this->cached_weekday_);
-          this->datetime_callback_.call(this->cached_data_identifier_, this->cached_year_, this->cached_month_, this->cached_day_, this->cached_weekday_);
+          this->datetime_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::DATETIME), this->cached_year_, this->cached_month_, this->cached_day_, this->cached_weekday_);
           break;
         case EVENT_DI_TIME_HMS:
           ESP_LOGD(TAG, "⏰ 传递时分秒: %02u:%02u:%02u", this->cached_hour_, this->cached_minute_, this->cached_second_);
-          this->time_hms_callback_.call(this->cached_data_identifier_, this->cached_hour_, this->cached_minute_, this->cached_second_);
+          this->time_hms_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::TIME_HMS), this->cached_hour_, this->cached_minute_, this->cached_second_);
           break;
         default:
           ESP_LOGW(TAG, "⚠️ 未知事件位: 0x%08X", dlt645_events[i].bit);
@@ -1020,18 +1023,20 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
   }
   ESP_LOGD(TAG, "📊 实际数据 (%d字节): %s", actual_data.size(), hex_str.c_str());
   
-  switch (data_identifier) {
-    case 0x04000401: {  // 设备地址查询
+  // 将data_identifier转换为枚举类型，简化后续代码
+  auto di_enum = static_cast<DLT645_DATA_IDENTIFIER>(data_identifier);
+  
+  switch (di_enum) {
+    case DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS: {  // 设备地址查询
       ESP_LOGW(TAG, "🔍 [设备地址查询] 响应已接收");
       // 设备地址信息通常在帧的地址域中，这里主要确认查询成功
       
-      // 保存数据标识符并设置事件位（线程安全）
-      this->cached_data_identifier_ = data_identifier;
+      // 设置事件位（线程安全）
       xEventGroupSetBits(this->event_group_, EVENT_DI_DEVICE_ADDRESS);
       break;
     }
     
-    case 0x02030000: {  // 总有功功率
+    case DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL: {  // 总有功功率
       if (actual_data.size() >= 3) {
         // DL/T 645功率格式：3字节BCD，XX.XXXX kW (4位小数)
         
@@ -1049,7 +1054,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_active_power_w_ = power_w;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_ACTIVE_POWER_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 总有功功率数据长度不足");
@@ -1057,7 +1061,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x00010000: {  // 正向有功总电能
+    case DLT645_DATA_IDENTIFIER::ENERGY_ACTIVE_TOTAL: {  // 正向有功总电能
       if (actual_data.size() >= 4) {
         // DL/T 645电能格式：4字节BCD，XXXXXX.XX kWh (2位小数)
         float energy_kwh = bcd_to_float(actual_data, 2);
@@ -1066,7 +1070,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_energy_active_kwh_ = energy_kwh;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_ENERGY_ACTIVE_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 正向有功总电能数据长度不足");
@@ -1074,7 +1077,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x02010100: {  // A相电压
+    case DLT645_DATA_IDENTIFIER::VOLTAGE_A_PHASE: {  // A相电压
       if (actual_data.size() >= 2) {
         // DL/T 645电压格式：2字节BCD，XXX.X V (1位小数)
         float voltage_v = bcd_to_float(actual_data, 1);
@@ -1083,7 +1086,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_voltage_a_v_ = voltage_v;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_VOLTAGE_A_PHASE);
       } else {
         ESP_LOGW(TAG, "⚠️ A相电压数据长度不足");
@@ -1091,14 +1093,13 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x02020100: {  // A相电流
+    case DLT645_DATA_IDENTIFIER::CURRENT_A_PHASE: {  // A相电流
       if (actual_data.size() >= 3) {
         float current_a = bcd_to_float_with_sign(actual_data, 3);
         
         ESP_LOGD(TAG, "🔄 [A相电流] %.3f A", current_a);
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_current_a_a_ = current_a;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_CURRENT_A_PHASE);
       } else {
         ESP_LOGW(TAG, "⚠️ A相电流数据长度不足");
@@ -1106,7 +1107,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x02060000: {  // 总功率因数
+    case DLT645_DATA_IDENTIFIER::POWER_FACTOR_TOTAL: {  // 总功率因数
       if (actual_data.size() >= 2) {
         // DL/T 645功率因数格式：2字节BCD，X.XXX (3位小数)
         ESP_LOGD(TAG, "📊 总功率因数原始数据: %02X %02X", actual_data[0], actual_data[1]);
@@ -1115,7 +1116,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_power_factor_ = power_factor;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_POWER_FACTOR_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 总功率因数数据长度不足");
@@ -1123,7 +1123,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x02800002: {  // 电网频率
+    case DLT645_DATA_IDENTIFIER::FREQUENCY: {  // 电网频率
       if (actual_data.size() >= 2) {
         // DL/T 645频率格式：2字节BCD，XX.XX Hz (2位小数)
         float frequency_hz = bcd_to_float(actual_data, 2);
@@ -1132,7 +1132,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_frequency_hz_ = frequency_hz;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_FREQUENCY);
       } else {
         ESP_LOGW(TAG, "⚠️ 电网频率数据长度不足");
@@ -1140,7 +1139,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x00020000: {  // 反向有功总电能
+    case DLT645_DATA_IDENTIFIER::ENERGY_REVERSE_TOTAL: {  // 反向有功总电能
       if (actual_data.size() >= 4) {
         // DL/T 645电能格式：4字节BCD，XXXXXX.XX kWh (2位小数)
         float energy_kwh = bcd_to_float(actual_data, 2);
@@ -1149,7 +1148,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_energy_reverse_kwh_ = energy_kwh;
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_ENERGY_REVERSE_TOTAL);
       } else {
         ESP_LOGW(TAG, "⚠️ 反向有功总电能数据长度不足");
@@ -1157,7 +1155,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x04000101: {  // 日期时间
+    case DLT645_DATA_IDENTIFIER::DATETIME: {  // 日期时间
       // 输出原始数据用于调试
       std::string hex_str = "";
       for (size_t i = 0; i < actual_data.size(); i++) {
@@ -1213,7 +1211,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_datetime_str_ = std::string(datetime_str);
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_DATETIME);
       } else if (actual_data.size() >= 6) {
         // 6字节或更多字节格式：DL/T 645-2007 标准格式
@@ -1227,7 +1224,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_datetime_str_ = std::string(datetime_str);
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_DATETIME);
       } else {
         ESP_LOGW(TAG, "❌ 日期时间数据长度异常: %d 字节 - 原始数据: %s", actual_data.size(), hex_str.c_str());
@@ -1235,7 +1231,7 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
       break;
     }
     
-    case 0x04000102: {  // 时分秒
+    case DLT645_DATA_IDENTIFIER::TIME_HMS: {  // 时分秒
       if (actual_data.size() >= 3) {
         // BCD转换lambda函数
         auto bcd_to_byte = [](uint8_t bcd) -> int {
@@ -1261,7 +1257,6 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
         
         // 保存数据到缓存变量并设置事件位（线程安全）
         this->cached_time_hms_str_ = std::string(time_hms_str);
-        this->cached_data_identifier_ = data_identifier;
         xEventGroupSetBits(this->event_group_, EVENT_DI_TIME_HMS);
       } else {
         ESP_LOGW(TAG, "⚠️ 时分秒数据长度不足");

@@ -31,19 +31,33 @@ constexpr UBaseType_t HELLO_WORLD_TASK_PRIORITY = 5;    // 中等优先级
 #endif
 constexpr uint32_t HELLO_WORLD_TRIGGER_INTERVAL_MS = 5000;  // 5秒间隔
 
+// DL/T 645-2007 数据标识符枚举定义
+enum class DLT645_DATA_IDENTIFIER : uint32_t {
+  DEVICE_ADDRESS      = 0x04000401,  // 设备地址查询
+  ACTIVE_POWER_TOTAL  = 0x02030000,  // 总有功功率
+  ENERGY_ACTIVE_TOTAL = 0x00010000,  // 正向有功总电能
+  VOLTAGE_A_PHASE     = 0x02010100,  // A相电压
+  CURRENT_A_PHASE     = 0x02020100,  // A相电流
+  POWER_FACTOR_TOTAL  = 0x02060000,  // 总功率因数
+  FREQUENCY           = 0x02800002,  // 电网频率
+  ENERGY_REVERSE_TOTAL = 0x00020000, // 反向有功总电能
+  DATETIME            = 0x04000101,  // 日期时间
+  TIME_HMS            = 0x04000102   // 时分秒
+};
+
 // Event Group事件位定义 - DL/T 645-2007数据标识符对应的事件位
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
 const EventBits_t EVENT_GENERAL = BIT0;            // BIT0: 保持原有的一般事件
-const EventBits_t EVENT_DI_DEVICE_ADDRESS = BIT1;  // BIT1: 设备地址查询 (0x04000401)
-const EventBits_t EVENT_DI_ACTIVE_POWER_TOTAL = BIT2;  // BIT2: 总功率 (0x02030000)
-const EventBits_t EVENT_DI_ENERGY_ACTIVE_TOTAL = BIT3; // BIT3: 总电能 (0x00010000)
-const EventBits_t EVENT_DI_VOLTAGE_A_PHASE = BIT4;     // BIT4: A相电压 (0x02010100)
-const EventBits_t EVENT_DI_CURRENT_A_PHASE = BIT5;     // BIT5: A相电流 (0x02020100)
-const EventBits_t EVENT_DI_POWER_FACTOR_TOTAL = BIT6;  // BIT6: 功率因数 (0x02060000)
-const EventBits_t EVENT_DI_FREQUENCY = BIT7;           // BIT7: 频率 (0x02800002)
-const EventBits_t EVENT_DI_ENERGY_REVERSE_TOTAL = BIT8; // BIT8: 反向总电能 (0x00020000)
-const EventBits_t EVENT_DI_DATETIME = BIT9;            // BIT9: 日期时间 (0x04000101)
-const EventBits_t EVENT_DI_TIME_HMS = BIT10;           // BIT10: 时分秒 (0x04000102)
+const EventBits_t EVENT_DI_DEVICE_ADDRESS = BIT1;  // BIT1: 设备地址查询
+const EventBits_t EVENT_DI_ACTIVE_POWER_TOTAL = BIT2;  // BIT2: 总功率
+const EventBits_t EVENT_DI_ENERGY_ACTIVE_TOTAL = BIT3; // BIT3: 总电能
+const EventBits_t EVENT_DI_VOLTAGE_A_PHASE = BIT4;     // BIT4: A相电压
+const EventBits_t EVENT_DI_CURRENT_A_PHASE = BIT5;     // BIT5: A相电流
+const EventBits_t EVENT_DI_POWER_FACTOR_TOTAL = BIT6;  // BIT6: 功率因数
+const EventBits_t EVENT_DI_FREQUENCY = BIT7;           // BIT7: 频率
+const EventBits_t EVENT_DI_ENERGY_REVERSE_TOTAL = BIT8; // BIT8: 反向总电能
+const EventBits_t EVENT_DI_DATETIME = BIT9;            // BIT9: 日期时间
+const EventBits_t EVENT_DI_TIME_HMS = BIT10;           // BIT10: 时分秒
 
 // 所有DL/T 645事件位的掩码 (BIT1-BIT10)
 const EventBits_t ALL_DLT645_EVENTS = EVENT_DI_DEVICE_ADDRESS | EVENT_DI_ACTIVE_POWER_TOTAL | 
@@ -230,9 +244,6 @@ class HelloWorldComponent : public Component {
   uint32_t cached_hour_{0};                      // 时
   uint32_t cached_minute_{0};                    // 分
   uint32_t cached_second_{0};                    // 秒
-  
-  // 数据标识符缓存（用于callback传递）
-  uint32_t cached_data_identifier_{0};
 };
 
 // 原有的通用触发器（保持向后兼容）
