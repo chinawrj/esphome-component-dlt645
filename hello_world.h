@@ -120,6 +120,10 @@ class HelloWorldComponent : public Component {
   void process_uart_data();                          // 处理UART数据
   void check_and_parse_dlt645_frame();              // 检查和解析DL/T 645帧
   
+  // 动态波特率切换功能（仅针对设备发现命令超时）
+  bool change_uart_baud_rate(int new_baud_rate);     // 切换UART波特率
+  void cycle_to_next_baud_rate();                    // 循环切换到下一个波特率
+  
   // DL/T 645-2007 帧构建和数据处理辅助函数
   std::vector<uint8_t> build_dlt645_read_frame(const std::vector<uint8_t>& address, uint32_t data_identifier);
   void scramble_dlt645_data(std::vector<uint8_t>& data);     // 数据加扰 (+0x33)
@@ -187,10 +191,16 @@ class HelloWorldComponent : public Component {
   std::vector<uint8_t> response_buffer_;         // 响应缓冲区
   uint32_t last_data_receive_time_{0};           // 最后接收数据时间
   bool waiting_for_response_{false};             // 等待响应标志
-  uint32_t frame_timeout_ms_{5000};              // 帧超时时间(5秒)
+  uint32_t frame_timeout_ms_{1000};              // 一般命令帧超时时间(1秒)
+  uint32_t device_discovery_timeout_ms_{2000};   // 设备发现命令专用超时时间(2秒)
   
   // 请求-响应匹配
   uint32_t last_sent_data_identifier_{0};        // 最后发送的数据标识符
+  
+  // 波特率自动切换管理（仅针对设备发现命令超时）
+  std::vector<int> baud_rate_list_{9600, 4800, 2400, 1200};  // 波特率列表，从高到低
+  size_t current_baud_rate_index_{0};            // 当前波特率索引
+  bool is_device_discovery_command_{false};      // 当前是否为设备发现命令
   
   // 性能测量变量
   uint32_t command_send_start_time_{0};

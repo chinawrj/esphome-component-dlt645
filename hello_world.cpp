@@ -42,9 +42,14 @@ void HelloWorldComponent::setup() {
   // 初始化响应处理变量
   this->response_buffer_.clear();
   this->waiting_for_response_ = false;
-  this->frame_timeout_ms_ = 500;  // 500ms超时
+  this->frame_timeout_ms_ = 1000;  // 一般命令1秒超时
+  this->device_discovery_timeout_ms_ = 2000;  // 设备发现2秒超时
   this->last_data_receive_time_ = 0;
   this->last_sent_data_identifier_ = 0;
+  
+  // 初始化波特率管理变量
+  this->current_baud_rate_index_ = 0;  // 从第一个波特率开始（9600）
+  this->is_device_discovery_command_ = false;
   
   // 性能测量变量初始化
   this->command_send_start_time_ = 0;
@@ -108,6 +113,9 @@ void HelloWorldComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Task Stack Size: %lu 字节", (unsigned long)HELLO_WORLD_TASK_STACK_SIZE);
   ESP_LOGCONFIG(TAG, "  Task Priority: %d", (int)HELLO_WORLD_TASK_PRIORITY);
   ESP_LOGCONFIG(TAG, "  Event Group: %s", this->event_group_ ? "已创建" : "未创建");
+  ESP_LOGCONFIG(TAG, "  DL/T 645 超时配置:");
+  ESP_LOGCONFIG(TAG, "    - 一般命令超时: %lu ms", (unsigned long)this->frame_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "    - 设备发现超时: %lu ms", (unsigned long)this->device_discovery_timeout_ms_);
 #endif
 }
 
@@ -270,6 +278,10 @@ void HelloWorldComponent::hello_world_task_func(void* parameter) {
           query_address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};  // 广播地址
         }
         
+        // 标记当前不是设备发现命令
+        component->is_device_discovery_command_ = false;
+        component->last_sent_data_identifier_ = data_identifier;
+        
         std::vector<uint8_t> query_frame = component->build_dlt645_read_frame(query_address, data_identifier);
         send_success = component->send_dlt645_frame(query_frame);
       }
@@ -404,9 +416,12 @@ void HelloWorldComponent::process_hello_world_events() {
 bool HelloWorldComponent::init_dlt645_uart() {
   ESP_LOGI(TAG, "🔧 初始化DL/T 645-2007 UART通信...");
   
+  // 使用当前波特率列表中的波特率
+  int current_baud_rate = this->baud_rate_list_[this->current_baud_rate_index_];
+  
   // UART配置结构体
   uart_config_t uart_config = {
-      .baud_rate = DLT645_BAUD_RATE,              // 2400 波特率
+      .baud_rate = current_baud_rate,                 // 使用可变波特率
       .data_bits = UART_DATA_8_BITS,              // 8数据位  
       .parity = UART_PARITY_EVEN,                 // 偶校验
       .stop_bits = UART_STOP_BITS_1,              // 1停止位
@@ -415,7 +430,7 @@ bool HelloWorldComponent::init_dlt645_uart() {
       .source_clk = UART_SCLK_DEFAULT,            // 默认时钟源
   };
   
-  ESP_LOGI(TAG, "📋 UART配置: 波特率=%d, 数据位=8, 校验=偶校验, 停止位=1", DLT645_BAUD_RATE);
+  ESP_LOGI(TAG, "📋 UART配置: 波特率=%d, 数据位=8, 校验=偶校验, 停止位=1", current_baud_rate);
   
   // 配置UART参数
   esp_err_t ret = uart_param_config(this->uart_port_, &uart_config);
@@ -456,6 +471,79 @@ void HelloWorldComponent::deinit_dlt645_uart() {
     uart_driver_delete(this->uart_port_);
     this->uart_initialized_ = false;
     ESP_LOGI(TAG, "✅ UART已反初始化");
+  }
+}
+
+// === 动态波特率切换功能实现 ===
+
+bool HelloWorldComponent::change_uart_baud_rate(int new_baud_rate) {
+  if (!this->uart_initialized_) {
+    ESP_LOGE(TAG, "❌ UART未初始化，无法切换波特率");
+    return false;
+  }
+  
+  ESP_LOGD(TAG, "� 执行UART波特率切换到: %d", new_baud_rate);
+  
+  // 停止当前UART操作
+  uart_wait_tx_done(this->uart_port_, pdMS_TO_TICKS(100));
+  uart_flush_input(this->uart_port_);
+  
+  // 删除现有驱动
+  uart_driver_delete(this->uart_port_);
+  this->uart_initialized_ = false;
+  
+  // 重新配置UART
+  uart_config_t uart_config = {
+      .baud_rate = new_baud_rate,                     // 使用新的波特率
+      .data_bits = UART_DATA_8_BITS,              
+      .parity = UART_PARITY_EVEN,                 
+      .stop_bits = UART_STOP_BITS_1,              
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,      
+      .rx_flow_ctrl_thresh = 122,                 
+      .source_clk = UART_SCLK_DEFAULT,            
+  };
+  
+  esp_err_t ret = uart_param_config(this->uart_port_, &uart_config);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ UART参数配置失败: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  // 设置UART引脚
+  ret = uart_set_pin(this->uart_port_, DLT645_TX_PIN, DLT645_RX_PIN, 
+                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ UART引脚设置失败: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  // 重新安装UART驱动程序
+  ret = uart_driver_install(this->uart_port_, DLT645_RX_BUFFER_SIZE, 0, 0, nullptr, 0);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ UART驱动安装失败: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  this->uart_initialized_ = true;
+  
+  ESP_LOGI(TAG, "✅ DL/T 645 UART波特率切换成功: %d", new_baud_rate);
+  return true;
+}
+
+void HelloWorldComponent::cycle_to_next_baud_rate() {
+  // 获取当前波特率用于日志显示
+  int current_baud_rate = this->baud_rate_list_[this->current_baud_rate_index_];
+  
+  // 循环到下一个波特率
+  this->current_baud_rate_index_ = (this->current_baud_rate_index_ + 1) % this->baud_rate_list_.size();
+  int next_baud_rate = this->baud_rate_list_[this->current_baud_rate_index_];
+  
+  ESP_LOGI(TAG, "🔄 设备发现超时，从 %d 切换到下一个波特率: %d (索引: %d/%d)", 
+           current_baud_rate, next_baud_rate, this->current_baud_rate_index_, this->baud_rate_list_.size());
+  
+  // 执行波特率切换
+  if (!this->change_uart_baud_rate(next_baud_rate)) {
+    ESP_LOGE(TAG, "❌ 波特率切换失败，保持当前设置");
   }
 }
 
@@ -507,13 +595,36 @@ void HelloWorldComponent::process_uart_data() {
   
   uint32_t current_time = get_current_time_ms();
   
-  // 检查响应超时
+  // 检查响应超时 - 根据命令类型使用不同的超时时间
+  uint32_t timeout_ms = this->is_device_discovery_command_ ? 
+                        this->device_discovery_timeout_ms_ : this->frame_timeout_ms_;
+  
   if (this->waiting_for_response_ && 
-      current_time - this->last_data_receive_time_ > this->frame_timeout_ms_) {
-    ESP_LOGW(TAG, "⏰ DL/T 645响应超时，清空缓冲区");
-    this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
-    return;
+      current_time - this->last_data_receive_time_ > timeout_ms) {
+    
+    // 检查是否为设备发现命令超时
+    if (this->is_device_discovery_command_ && this->last_sent_data_identifier_ == 0x04000401) {
+      ESP_LOGW(TAG, "⏰ 设备发现命令超时 (等待时间: %dms, 超时阈值: %dms, DI: 0x%08X)，准备切换波特率", 
+               current_time - this->last_data_receive_time_, this->device_discovery_timeout_ms_, this->last_sent_data_identifier_);
+      
+      // 清空缓冲区并重置等待状态
+      this->response_buffer_.clear();
+      this->waiting_for_response_ = false;
+      this->is_device_discovery_command_ = false;  // 重置发现命令标记
+      
+      // 执行波特率切换
+      this->cycle_to_next_baud_rate();
+      
+      ESP_LOGI(TAG, "🔄 波特率切换完成，将在下次循环重试设备发现");
+      return;
+    } else {
+      // 其他命令的正常超时处理
+      ESP_LOGW(TAG, "⏰ DL/T 645响应超时，清空缓冲区 (等待时间: %dms, 超时阈值: %dms, DI: 0x%08X)", 
+               current_time - this->last_data_receive_time_, this->frame_timeout_ms_, this->last_sent_data_identifier_);
+      this->response_buffer_.clear();
+      this->waiting_for_response_ = false;
+      return;
+    }
   }
   
   // 检查是否有可用数据
@@ -723,6 +834,7 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
   // 清空缓冲区并重置等待状态
   this->response_buffer_.clear();
   this->waiting_for_response_ = false;
+  this->is_device_discovery_command_ = false;  // 重置发现命令标记
   
   ESP_LOGD(TAG, "📦 DL/T 645帧解析完成");
 }
@@ -860,6 +972,10 @@ bool HelloWorldComponent::discover_meter_address() {
   // 数据标识符：设备地址查询 (0x04000401)
   uint32_t device_address_di = 0x04000401;
   
+  // 标记当前执行的是设备发现命令（用于超时处理）
+  this->is_device_discovery_command_ = true;
+  this->last_sent_data_identifier_ = device_address_di;
+  
   // 构建地址发现帧
   std::vector<uint8_t> discover_frame = build_dlt645_read_frame(broadcast_address, device_address_di);
   
@@ -878,6 +994,7 @@ bool HelloWorldComponent::discover_meter_address() {
     }
   } else {
     ESP_LOGE(TAG, "❌ 地址发现命令发送失败");
+    this->is_device_discovery_command_ = false;  // 重置标记
   }
   
   return success;
@@ -912,6 +1029,10 @@ bool HelloWorldComponent::query_active_power_total() {
   
   // 数据标识符：总有功功率 (0x02030000)
   uint32_t active_power_total_di = 0x02030000;
+  
+  // 标记当前不是设备发现命令
+  this->is_device_discovery_command_ = false;
+  this->last_sent_data_identifier_ = active_power_total_di;
   
   // 构建功率查询帧
   std::vector<uint8_t> power_query_frame = build_dlt645_read_frame(meter_address, active_power_total_di);
