@@ -41,7 +41,6 @@ void HelloWorldComponent::setup() {
   
   // 初始化响应处理变量
   this->response_buffer_.clear();
-  this->waiting_for_response_ = false;
   this->frame_timeout_ms_ = 1000;  // 一般命令1秒超时
   this->device_discovery_timeout_ms_ = 2000;  // 设备发现2秒超时
   this->last_data_receive_time_ = 0;
@@ -49,7 +48,6 @@ void HelloWorldComponent::setup() {
   
   // 初始化波特率管理变量
   this->current_baud_rate_index_ = 0;  // 从第一个波特率开始（9600）
-  this->is_device_discovery_command_ = false;
   
   // 性能测量变量初始化
   this->command_send_start_time_ = 0;
@@ -184,17 +182,16 @@ void HelloWorldComponent::destroy_hello_world_task() {
   ESP_LOGI(TAG, "✅ FreeRTOS任务已销毁");
 }
 
-// 静态任务函数 - 在独立的FreeRTOS任务中运行
-void HelloWorldComponent::hello_world_task_func(void* parameter) {
+// Static task function - runs in independent FreeRTOS task
+void HelloWorldComponent::hello_world_task_func(void* parameter) 
+{
   HelloWorldComponent* component = static_cast<HelloWorldComponent*>(parameter);
   
-  ESP_LOGI(TAG, "🚀 FreeRTOS任务启动，任务句柄: %p", xTaskGetCurrentTaskHandle());
-  ESP_LOGI(TAG, "📊 任务堆栈高水位: %lu 字节", 
-           (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
+  ESP_LOGI(TAG, "🚀 FreeRTOS task started, task handle: %p", xTaskGetCurrentTaskHandle());
+  ESP_LOGI(TAG, "📊 Task stack high water mark: %lu bytes", (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
   
   uint32_t last_trigger_time = get_current_time_ms();
   
-  // DL/T 645-2007数据标识符数组和对应的事件位（按用户要求重新排序）
   const EventBits_t dlt645_event_bits[] = {
     EVENT_DI_DEVICE_ADDRESS,        // BIT1: 设备地址查询 (0x04000401)
     EVENT_DI_ACTIVE_POWER_TOTAL,    // BIT2: 总功率 (0x02030000)
@@ -237,67 +234,58 @@ void HelloWorldComponent::hello_world_task_func(void* parameter) {
   const size_t num_dlt645_events = sizeof(dlt645_event_bits) / sizeof(dlt645_event_bits[0]);
   size_t current_event_index = 0;
   
-  ESP_LOGI(TAG, "📋 DL/T 645事件循环已配置，共 %d 个数据标识符", num_dlt645_events);
+  ESP_LOGI(TAG, "📋 DL/T 645 event loop configured with %d data identifiers", num_dlt645_events);
   
   // === DL/T 645-2007 UART通信主循环 ===
-  uint32_t last_dlt645_send_time = 0;
-  const uint32_t DLT645_SEND_INTERVAL_MS = 50;  // 1秒发送间隔（对应YAML中的1s interval）
-  uint32_t last_uart_read_time = 0;
   const uint32_t UART_READ_INTERVAL_MS = 5;
   
   // 任务主循环 - DL/T 645通信 + 事件触发
   while (component->task_running_) {
-    uint32_t now = get_current_time_ms();
-    
-    // === 1. DL/T 645 UART数据读取处理（10ms间隔）===
-    if (now - last_uart_read_time >= UART_READ_INTERVAL_MS) {
-      component->process_uart_data();
-      last_uart_read_time = now;
-    }
-
     // === 2. DL/T 645 数据查询发送（1s间隔）===
-    if (now - last_dlt645_send_time >= DLT645_SEND_INTERVAL_MS && false == component->waiting_for_response_) {
-      // 获取当前要查询的数据标识符
+      current_event_index = component->get_next_event_index(current_event_index, num_dlt645_events);
       uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
       const char* event_name = dlt645_event_names[current_event_index];
       
-      ESP_LOGD(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name, data_identifier);
+      ESP_LOGI(TAG, "📡 [%d/%d] 发送DL/T 645查询: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name, data_identifier);
       
       // 根据当前数据标识符选择相应的查询函数
       bool send_success = false;
       if (data_identifier == 0x04000401) {
         // 设备地址查询
+        component->switch_baud_rate_when_failed_ = true;
+#if 0
         send_success = component->discover_meter_address();
+#else
+        //use power query to discover address
+        send_success = component->query_active_power_total();
+#endif
       } else if (data_identifier == 0x02030000) {
         // 总有功功率查询
+        component->switch_baud_rate_when_failed_ = false;
         send_success = component->query_active_power_total();
       } else {
         // 通用查询 - 使用当前已知地址或广播地址
+        component->switch_baud_rate_when_failed_ = false;
         std::vector<uint8_t> query_address = component->meter_address_bytes_;
         if (query_address.empty()) {
           query_address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};  // 广播地址
         }
         
-        // 标记当前不是设备发现命令
-        component->is_device_discovery_command_ = false;
+        // 记录数据标识符用于响应匹配
         component->last_sent_data_identifier_ = data_identifier;
         
         std::vector<uint8_t> query_frame = component->build_dlt645_read_frame(query_address, data_identifier);
-        send_success = component->send_dlt645_frame(query_frame);
+        send_success = component->send_dlt645_frame(query_frame, component->frame_timeout_ms_);
       }
       
       if (!send_success) {
         ESP_LOGW(TAG, "⚠️ DL/T 645查询发送失败: %s", event_name);
       }
-      
-      // 使用新的事件索引管理函数
-      current_event_index = component->get_next_event_index(current_event_index, num_dlt645_events);
-      
-      last_dlt645_send_time = now;
-    }
+      //ready data immediately after sending
+      component->process_uart_data();
     
     // 任务延迟 - 释放CPU给其他任务
-    vTaskDelay(pdMS_TO_TICKS(10));  // 10ms延迟，提高响应性
+    vTaskDelay(pdMS_TO_TICKS(5));  // 10ms延迟，提高响应性
   }
   
   ESP_LOGI(TAG, "🛑 FreeRTOS任务即将退出");
@@ -547,7 +535,7 @@ void HelloWorldComponent::cycle_to_next_baud_rate() {
   }
 }
 
-bool HelloWorldComponent::send_dlt645_frame(const std::vector<uint8_t>& frame_data) {
+bool HelloWorldComponent::send_dlt645_frame(const std::vector<uint8_t>& frame_data, uint32_t timeout_ms) {
   if (!this->uart_initialized_) {
     ESP_LOGE(TAG, "❌ UART未初始化，无法发送数据帧");
     return false;
@@ -560,7 +548,7 @@ bool HelloWorldComponent::send_dlt645_frame(const std::vector<uint8_t>& frame_da
     sprintf(hex_str, "%02X ", frame_data[i]);
     hex_frame += hex_str;
   }
-  ESP_LOGD(TAG, "📤 发送DL/T 645帧 (%d字节): %s", frame_data.size(), hex_frame.c_str());
+  ESP_LOGD(TAG, "📤 发送DL/T 645帧 (%d字节, 超时%dms): %s", frame_data.size(), timeout_ms, hex_frame.c_str());
   
   // 清空接收缓冲区
   uart_flush_input(this->uart_port_);
@@ -580,11 +568,11 @@ bool HelloWorldComponent::send_dlt645_frame(const std::vector<uint8_t>& frame_da
   // 等待发送完成
   uart_wait_tx_done(this->uart_port_, pdMS_TO_TICKS(500));
   
-  // 标记等待响应状态
-  this->waiting_for_response_ = true;
+  // 标记等待响应状态并设置当前命令的超时时间
+  this->current_command_timeout_ms_ = timeout_ms;  // 设置当前命令的超时时间
   this->last_data_receive_time_ = get_current_time_ms();
   
-  ESP_LOGD(TAG, "✅ 成功发送 %d 字节 DL/T 645帧", frame_data.size());
+  ESP_LOGD(TAG, "✅ 成功发送 %d 字节 DL/T 645帧，超时时间: %dms", frame_data.size(), timeout_ms);
   return true;
 }
 
@@ -593,79 +581,71 @@ void HelloWorldComponent::process_uart_data() {
     return;
   }
   
-  uint32_t current_time = get_current_time_ms();
+  // 使用新的超时机制：直接使用send_dlt645_frame()中设置的current_command_timeout_ms_
+  uint32_t timeout_ms = this->current_command_timeout_ms_;
+  bool is_device_discovery = (this->last_sent_data_identifier_ == 0x04000401);
   
-  // 检查响应超时 - 根据命令类型使用不同的超时时间
-  uint32_t timeout_ms = this->is_device_discovery_command_ ? 
-                        this->device_discovery_timeout_ms_ : this->frame_timeout_ms_;
+  ESP_LOGD(TAG, "📡 开始读取UART数据，超时时间: %dms (命令类型: %s, DI: 0x%08X)", 
+           timeout_ms, is_device_discovery ? "设备发现" : "常规命令", this->last_sent_data_identifier_);
   
-  if (this->waiting_for_response_ && 
-      current_time - this->last_data_receive_time_ > timeout_ms) {
+  // === 第1步: 使用current_command_timeout_ms_进行首次读取，如果超时则处理命令超时 ===
+  uint8_t data[256];
+  int bytes_read = uart_read_bytes(this->uart_port_, data, sizeof(data), pdMS_TO_TICKS(timeout_ms));
+  
+  if (bytes_read <= 0) {
+    // 首次读取超时，说明当前命令超时了
+    uint32_t current_time = get_current_time_ms();
+    uint32_t actual_wait_time = current_time - this->last_data_receive_time_;
     
-    // 检查是否为设备发现命令超时
-    if (this->is_device_discovery_command_ && this->last_sent_data_identifier_ == 0x04000401) {
-      ESP_LOGW(TAG, "⏰ 设备发现命令超时 (等待时间: %dms, 超时阈值: %dms, DI: 0x%08X)，准备切换波特率", 
-               current_time - this->last_data_receive_time_, this->device_discovery_timeout_ms_, this->last_sent_data_identifier_);
-      
-      // 清空缓冲区并重置等待状态
-      this->response_buffer_.clear();
-      this->waiting_for_response_ = false;
-      this->is_device_discovery_command_ = false;  // 重置发现命令标记
-      
+    // 检查是否为设备发现命令超时（基于数据标识符判断）
+    ESP_LOGE(TAG, "⏰ DL/T 645响应超时，清空缓冲区 (实际等待时间: %dms, 超时阈值: %dms, DI: 0x%08X)", 
+              actual_wait_time, this->current_command_timeout_ms_, this->last_sent_data_identifier_);
+    this->response_buffer_.clear();
+    if (this->switch_baud_rate_when_failed_) {
       // 执行波特率切换
       this->cycle_to_next_baud_rate();
-      
-      ESP_LOGI(TAG, "🔄 波特率切换完成，将在下次循环重试设备发现");
-      return;
-    } else {
-      // 其他命令的正常超时处理
-      ESP_LOGW(TAG, "⏰ DL/T 645响应超时，清空缓冲区 (等待时间: %dms, 超时阈值: %dms, DI: 0x%08X)", 
-               current_time - this->last_data_receive_time_, this->frame_timeout_ms_, this->last_sent_data_identifier_);
-      this->response_buffer_.clear();
-      this->waiting_for_response_ = false;
-      return;
+      ESP_LOGW(TAG, "🔄 波特率切换完成，将在下次循环重试设备发现");
     }
+    return;
   }
   
-  // 检查是否有可用数据
-  size_t available_bytes = 0;
-  uart_get_buffered_data_len(this->uart_port_, &available_bytes);
-  
-  if (available_bytes == 0) {
-    return;  // 无数据可读
-  }
-  
-  ESP_LOGD(TAG, "📨 检测到UART数据: %d 字节", available_bytes);
-  
-  // 连续读取所有可用数据
-  uint8_t data[256];
+  // === 第2步: 读取到了数据，添加到缓冲区并继续读取剩余数据 ===
   int total_bytes_read = 0;
   
-  while (available_bytes > 0) {
-    int bytes_to_read = std::min(available_bytes, sizeof(data));
-    int bytes_read = uart_read_bytes(this->uart_port_, data, bytes_to_read, pdMS_TO_TICKS(20));
+  // 添加首次读取的数据到缓冲区
+  for (int i = 0; i < bytes_read; i++) {
+    this->response_buffer_.push_back(data[i]);
+  }
+  total_bytes_read += bytes_read;
+  
+  ESP_LOGD(TAG, "📨 首次读取到 %d 字节数据", bytes_read);
+  
+  // === 第3步: 使用20ms超时继续读取剩余数据，直到没有更多数据 ===
+  while (true) {
+    bytes_read = uart_read_bytes(this->uart_port_, data, sizeof(data), pdMS_TO_TICKS(20));
     
-    if (bytes_read > 0) {
-      // 添加到响应缓冲区
-      for (int i = 0; i < bytes_read; i++) {
-        this->response_buffer_.push_back(data[i]);
-      }
-      total_bytes_read += bytes_read;
-      this->last_data_receive_time_ = current_time;
-      
-      // 如果读取到数据，再多等待10ms以确保接收完整
-      vTaskDelay(pdMS_TO_TICKS(10));
-      
-      // 检查是否还有更多数据
-      uart_get_buffered_data_len(this->uart_port_, &available_bytes);
-    } else {
-      break;  // 无法读取更多数据
+    if (bytes_read <= 0) {
+      // 20ms内没有更多数据，停止读取
+      ESP_LOGD(TAG, "📦 20ms内无更多数据，停止读取");
+      break;
     }
+    
+    // 添加剩余数据到缓冲区
+    for (int i = 0; i < bytes_read; i++) {
+      this->response_buffer_.push_back(data[i]);
+    }
+    total_bytes_read += bytes_read;
+    
+    ESP_LOGD(TAG, "📨 继续读取到 %d 字节数据", bytes_read);
   }
   
+  // === 第4步: 处理读取到的数据 ===
   if (total_bytes_read > 0) {
     ESP_LOGD(TAG, "📥 总共读取 %d 字节，缓冲区总长度: %d", 
              total_bytes_read, this->response_buffer_.size());
+    
+    // 更新最后接收数据时间
+    this->last_data_receive_time_ = get_current_time_ms();
     
     // 检查帧完整性和解析
     this->check_and_parse_dlt645_frame();
@@ -701,7 +681,6 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
       this->response_buffer_[frame_start] != 0x68) {
     ESP_LOGW(TAG, "⚠️ 未找到有效的帧起始符 (0x68)");
     this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
     return;
   }
   
@@ -722,7 +701,6 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
       this->response_buffer_[idx + 7] != 0x68) {
     ESP_LOGW(TAG, "⚠️ 第二个起始符 (0x68) 验证失败");
     this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
     return;
   }
   
@@ -744,14 +722,12 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
   if (control_code == 0xD1 || control_code == 0xB1) {
     ESP_LOGW(TAG, "⚠️ 电表响应错误，控制码: 0x%02X", control_code);
     this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
     return;
   }
   
   if (control_code != 0x91) {
     ESP_LOGW(TAG, "⚠️ 未知的控制码: 0x%02X", control_code);
     this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
     return;
   }
   
@@ -768,7 +744,6 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
     ESP_LOGW(TAG, "⚠️ 帧结束符 (0x16) 验证失败: 0x%02X", 
              this->response_buffer_[frame_total_length - 1]);
     this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
     return;
   }
   
@@ -783,7 +758,6 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
     ESP_LOGW(TAG, "⚠️ 校验和验证失败 (计算: 0x%02X, 接收: 0x%02X)", 
              calculated_checksum, received_checksum);
     this->response_buffer_.clear();
-    this->waiting_for_response_ = false;
     return;
   }
   
@@ -833,9 +807,6 @@ void HelloWorldComponent::check_and_parse_dlt645_frame() {
   
   // 清空缓冲区并重置等待状态
   this->response_buffer_.clear();
-  this->waiting_for_response_ = false;
-  this->is_device_discovery_command_ = false;  // 重置发现命令标记
-  
   ESP_LOGD(TAG, "📦 DL/T 645帧解析完成");
 }
 
@@ -972,8 +943,7 @@ bool HelloWorldComponent::discover_meter_address() {
   // 数据标识符：设备地址查询 (0x04000401)
   uint32_t device_address_di = 0x04000401;
   
-  // 标记当前执行的是设备发现命令（用于超时处理）
-  this->is_device_discovery_command_ = true;
+  // 记录数据标识符用于响应匹配和超时判断
   this->last_sent_data_identifier_ = device_address_di;
   
   // 构建地址发现帧
@@ -981,20 +951,13 @@ bool HelloWorldComponent::discover_meter_address() {
   
   ESP_LOGD(TAG, "📡 发送地址发现命令，使用广播地址和DI=0x04000401");
   
-  // 发送地址发现帧
-  bool success = send_dlt645_frame(discover_frame);
+  // 发送地址发现帧，使用设备发现专用的超时时间
+  bool success = send_dlt645_frame(discover_frame, this->device_discovery_timeout_ms_);
   
   if (success) {
     ESP_LOGD(TAG, "✅ 地址发现命令已发送，等待电表响应...");
-    
-    // 触发设备地址查询事件
-    // 注意：这里使用EVENT_DI_DEVICE_ADDRESS事件位
-    if (this->event_group_ != nullptr) {
-      xEventGroupSetBits(this->event_group_, EVENT_DI_DEVICE_ADDRESS);
-    }
   } else {
     ESP_LOGE(TAG, "❌ 地址发现命令发送失败");
-    this->is_device_discovery_command_ = false;  // 重置标记
   }
   
   return success;
@@ -1030,8 +993,7 @@ bool HelloWorldComponent::query_active_power_total() {
   // 数据标识符：总有功功率 (0x02030000)
   uint32_t active_power_total_di = 0x02030000;
   
-  // 标记当前不是设备发现命令
-  this->is_device_discovery_command_ = false;
+  // 记录数据标识符用于响应匹配
   this->last_sent_data_identifier_ = active_power_total_di;
   
   // 构建功率查询帧
@@ -1039,8 +1001,8 @@ bool HelloWorldComponent::query_active_power_total() {
   
   ESP_LOGD(TAG, "📊 发送总有功功率查询命令，DI=0x02030000");
   
-  // 发送功率查询帧
-  bool success = send_dlt645_frame(power_query_frame);
+  // 发送功率查询帧，使用一般命令的超时时间
+  bool success = send_dlt645_frame(power_query_frame, this->frame_timeout_ms_);
   
   if (success) {
     ESP_LOGD(TAG, "✅ 总有功功率查询命令已发送，等待电表响应...");
@@ -1334,6 +1296,10 @@ void HelloWorldComponent::parse_dlt645_data_by_identifier(uint32_t data_identifi
 // ============= 事件索引管理函数 =============
 
 size_t HelloWorldComponent::get_next_event_index(size_t current_index, size_t max_events) {
+  if (false == this->device_address_discovered_) {
+    // 如果电表地址尚未发现，始终返回0以继续地址发现
+    return 0;
+  }
   // 计算下一个事件索引（循环）
   size_t next_index = (current_index + 1) % max_events;
   

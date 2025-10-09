@@ -116,7 +116,7 @@ class HelloWorldComponent : public Component {
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
   bool init_dlt645_uart();                           // UART初始化
   void deinit_dlt645_uart();                         // UART反初始化
-  bool send_dlt645_frame(const std::vector<uint8_t>& frame);  // 发送帧
+  bool send_dlt645_frame(const std::vector<uint8_t>& frame, uint32_t timeout_ms = 1000);  // 发送帧（可指定超时时间）
   void process_uart_data();                          // 处理UART数据
   void check_and_parse_dlt645_frame();              // 检查和解析DL/T 645帧
   
@@ -190,17 +190,18 @@ class HelloWorldComponent : public Component {
   // UART响应处理（对应YAML中的响应缓冲逻辑）
   std::vector<uint8_t> response_buffer_;         // 响应缓冲区
   uint32_t last_data_receive_time_{0};           // 最后接收数据时间
-  bool waiting_for_response_{false};             // 等待响应标志
+  uint32_t current_command_timeout_ms_{1000};    // 当前命令的超时时间(与waiting_for_response_配对使用)
   uint32_t frame_timeout_ms_{1000};              // 一般命令帧超时时间(1秒)
   uint32_t device_discovery_timeout_ms_{2000};   // 设备发现命令专用超时时间(2秒)
   
   // 请求-响应匹配
   uint32_t last_sent_data_identifier_{0};        // 最后发送的数据标识符
+  uint32_t switch_baud_rate_when_failed_{false}; // 失败时切换波特率标志
   
   // 波特率自动切换管理（仅针对设备发现命令超时）
   std::vector<int> baud_rate_list_{9600, 4800, 2400, 1200};  // 波特率列表，从高到低
   size_t current_baud_rate_index_{0};            // 当前波特率索引
-  bool is_device_discovery_command_{false};      // 当前是否为设备发现命令
+
   
   // 性能测量变量
   uint32_t command_send_start_time_{0};
