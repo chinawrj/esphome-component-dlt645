@@ -251,7 +251,7 @@ void DLT645Component::dlt645_task_func(void* parameter)
         }
         if (request_index == sizeof(dlt645_request_infos) / sizeof(dlt645_request_infos[0])) {
             ESP_LOGE(TAG, "❌ DL/T 645: Unknown request type %d", next_request_type);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
@@ -2024,6 +2024,8 @@ enum DLT645_REQUEST_TYPE DLT645Component::get_next_event_index()
         this->current_request_type = DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS;
         return this->current_request_type;
     }
+    //TODO create message queue during setup, and try to read current request type from it with timeout 4ms
+
 
     // Total power query with ratio control
     enum DLT645_REQUEST_TYPE next_request_type;
