@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/event_groups.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #endif
 
@@ -28,6 +29,7 @@ namespace dlt645_component {
 constexpr uint32_t DLT645_TASK_STACK_SIZE = 4096; // 4KB stack size
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
 constexpr UBaseType_t DLT645_TASK_PRIORITY = 5; // Medium priority
+constexpr UBaseType_t DLT645_REQUEST_QUEUE_LENGTH = 8; // Queue length for incoming requests
 #endif
 constexpr uint32_t DLT645_TRIGGER_INTERVAL_MS = 5000; // 5 second interval
 
@@ -272,6 +274,7 @@ protected:
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
     TaskHandle_t dlt645_task_handle_{nullptr};
     EventGroupHandle_t event_group_{nullptr};
+    QueueHandle_t request_queue_{nullptr};
     bool task_running_{false};
 #endif
 

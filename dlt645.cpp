@@ -99,6 +99,13 @@ void DLT645Component::setup()
     this->event_group_ = xEventGroupCreate();
     assert(this->event_group_ != nullptr && "Failed to create event group");
 
+    this->request_queue_ = xQueueCreate(DLT645_REQUEST_QUEUE_LENGTH, sizeof(DLT645_REQUEST_TYPE));
+    if (this->request_queue_ == nullptr) {
+        ESP_LOGE(TAG, "❌ Failed to create request queue");
+        this->mark_failed();
+        return;
+    }
+
     // FreeRTOS
     if (!this->create_dlt645_task()) {
         ESP_LOGE(TAG, "❌ FreeRTOS");
@@ -258,22 +265,33 @@ void DLT645Component::dlt645_task_func(void* parameter)
         uint32_t data_identifier = static_cast<uint32_t>(dlt645_request_infos[request_index].data_identifier);
         const char* event_name = dlt645_request_infos[request_index].name;
 
-        ESP_LOGD(TAG, "📡 [%d/%d] DL/T 645: %s (DI: 0x%08X)", current_index + 1, num_dlt645_events, event_name,
-                 data_identifier);
-
-        // data_identifier，
+        auto request_type = dlt645_request_infos[request_index].request_type;
         auto di_enum = static_cast<DLT645_DATA_IDENTIFIER>(data_identifier);
-
         bool send_success = false;
-        if (di_enum == DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS) {
+        switch (request_type) {
+        case DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS: 
+        {
             component->switch_baud_rate_when_failed_ = true;
+            component->last_sent_data_identifier_ = data_identifier;
 #if 0
-        send_success = component->discover_meter_address();
+            send_success = component->discover_meter_address();
 #else
             // use power query to discover address
             send_success = component->query_active_power_total();
 #endif
-        } else {
+            break;
+        }
+
+        case DLT645_REQUEST_TYPE::READ_ACTIVE_POWER_TOTAL:
+        case DLT645_REQUEST_TYPE::READ_ENERGY_ACTIVE_TOTAL:
+        case DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE:
+        case DLT645_REQUEST_TYPE::READ_CURRENT_A_PHASE:
+        case DLT645_REQUEST_TYPE::READ_POWER_FACTOR_TOTAL:
+        case DLT645_REQUEST_TYPE::READ_FREQUENCY:
+        case DLT645_REQUEST_TYPE::READ_ENERGY_REVERSE_TOTAL:
+        case DLT645_REQUEST_TYPE::READ_DATE:
+        case DLT645_REQUEST_TYPE::READ_TIME:
+        {
             // Unified code path for all data identifier queries (including ACTIVE_POWER_TOTAL)
             component->switch_baud_rate_when_failed_ = false;
             std::vector<uint8_t> query_address = component->meter_address_bytes_;
@@ -285,6 +303,74 @@ void DLT645Component::dlt645_task_func(void* parameter)
 
             std::vector<uint8_t> query_frame = component->build_dlt645_read_frame(query_address, data_identifier);
             send_success = component->send_dlt645_frame(query_frame, component->frame_timeout_ms_);
+            break;
+        }
+
+        case DLT645_REQUEST_TYPE::WRITE_DATE: {
+            component->switch_baud_rate_when_failed_ = false;
+            component->last_sent_data_identifier_ = data_identifier;
+            const auto& meter_address = component->meter_address_bytes_;
+            if (meter_address.size() != 6 || meter_address[0] == 0x99 || meter_address[0] == 0xAA) {
+                ESP_LOGE(TAG, "❌ DL/T 645: Cannot write datetime, meter address invalid or broadcast");
+                break;
+            }
+            std::vector<uint8_t> frame = component->build_dlt645_write_datetime_frame(meter_address);
+            if (!frame.empty()) {
+                send_success = component->send_dlt645_frame(frame, component->frame_timeout_ms_);
+            }
+            break;
+        }
+
+        case DLT645_REQUEST_TYPE::WRITE_TIME: {
+            component->switch_baud_rate_when_failed_ = false;
+            component->last_sent_data_identifier_ = data_identifier;
+            const auto& meter_address = component->meter_address_bytes_;
+            if (meter_address.size() != 6 || meter_address[0] == 0x99 || meter_address[0] == 0xAA) {
+                ESP_LOGE(TAG, "❌ DL/T 645: Cannot write time, meter address invalid or broadcast");
+                break;
+            }
+            std::vector<uint8_t> frame = component->build_dlt645_write_time_frame(meter_address);
+            if (!frame.empty()) {
+                send_success = component->send_dlt645_frame(frame, component->frame_timeout_ms_);
+            }
+            break;
+        }
+
+        case DLT645_REQUEST_TYPE::CONTROL_RELAY_CONNECT:
+        case DLT645_REQUEST_TYPE::CONTROL_RELAY_DISCONNECT: 
+        {
+            component->switch_baud_rate_when_failed_ = false;
+            component->last_sent_data_identifier_ = 0;
+            const auto& meter_address = component->meter_address_bytes_;
+            if (meter_address.size() != 6 || meter_address[0] == 0x99 || meter_address[0] == 0xAA) {
+                ESP_LOGE(TAG, "❌ DL/T 645: Cannot control relay, meter address invalid or broadcast");
+                break;
+            }
+            bool close_relay = (request_type == DLT645_REQUEST_TYPE::CONTROL_RELAY_CONNECT);
+            std::vector<uint8_t> frame = component->build_dlt645_relay_control_frame(meter_address, close_relay);
+            if (!frame.empty()) {
+                send_success = component->send_dlt645_frame(frame, component->frame_timeout_ms_);
+            }
+            break;
+        }
+
+        case DLT645_REQUEST_TYPE::CONTROL_BROADCAST_TIME_SYNC: {
+            component->switch_baud_rate_when_failed_ = false;
+            component->last_sent_data_identifier_ = 0;
+            std::vector<uint8_t> address = component->broadcast_address_bytes_;
+            if (address.size() != 6) {
+                address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};
+            }
+            std::vector<uint8_t> frame = component->build_dlt645_broadcast_time_sync_frame(address);
+            if (!frame.empty()) {
+                send_success = component->send_dlt645_frame(frame, component->frame_timeout_ms_);
+            }
+            break;
+        }
+
+        default:
+            ESP_LOGE(TAG, "❌ DL/T 645: Unsupported request type %u", static_cast<unsigned>(request_type));
+            break;
         }
 
         if (!send_success) {
@@ -562,7 +648,7 @@ bool DLT645Component::send_dlt645_frame(const std::vector<uint8_t>& frame_data, 
     this->response_buffer_.clear();
 
     // Dump frame data
-    ESP_LOGI(TAG, "📦 DL/T 645 frame data: %s", hex_frame.c_str());
+    ESP_LOGD(TAG, "📦 DL/T 645 frame data: %s", hex_frame.c_str());
     int bytes_written = uart_write_bytes(this->uart_port_, frame_data.data(), frame_data.size());
 
     if (bytes_written != frame_data.size()) {
@@ -701,7 +787,7 @@ void DLT645Component::check_and_parse_dlt645_frame()
     uint8_t control_code = this->response_buffer_[idx + 8];
     uint8_t data_length = this->response_buffer_[idx + 9];
 
-    ESP_LOGI(TAG, "📋 Frame parsed: Address=%02X %02X %02X %02X %02X %02X, Control=0x%02X, DataLen=%d", 
+    ESP_LOGD(TAG, "📋 Frame parsed: Address=%02X %02X %02X %02X %02X %02X, Control=0x%02X, DataLen=%d", 
              address[0], address[1], address[2], address[3], address[4], address[5], control_code, data_length);
 
     // Check for error responses (0xD1, 0xB1 for read errors, 0xDC, 0xBC for control errors)
@@ -1511,117 +1597,65 @@ bool DLT645Component::query_active_power_total()
 
 bool DLT645Component::relay_trip_action()
 {
-    if (!this->uart_initialized_) {
-        ESP_LOGE(TAG, "❌ UART not initialized, cannot execute relay trip operation");
+    if (this->request_queue_ == nullptr) {
+        ESP_LOGE(TAG, "❌ Request queue not initialized, cannot enqueue relay trip request");
         return false;
     }
 
-    if (this->meter_address_bytes_.empty() ||
-        (this->meter_address_bytes_.size() == 6 && this->meter_address_bytes_[0] == 0x99)) {
-        ESP_LOGE(TAG, "❌ Meter address not discovered, cannot execute relay trip operation");
+    ESP_LOGI(TAG, "⚡ Queuing relay TRIP/OPEN request...");
+
+    constexpr TickType_t enqueue_timeout_ticks = 0;
+    DLT645_REQUEST_TYPE request = DLT645_REQUEST_TYPE::CONTROL_RELAY_DISCONNECT;
+
+    if (xQueueSend(this->request_queue_, &request, enqueue_timeout_ticks) != pdTRUE) {
+        ESP_LOGE(TAG, "❌ Failed to enqueue relay trip request");
         return false;
     }
 
-    ESP_LOGW(TAG, "⚡ Executing relay TRIP/OPEN operation...");
-
-    // Use current meter address
-    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
-
-    ESP_LOGI(TAG, "📡 Sending TRIP command to meter address: %02X %02X %02X %02X %02X %02X",
-             meter_address[0], meter_address[1], meter_address[2],
-             meter_address[3], meter_address[4], meter_address[5]);
-
-    // Build trip command frame (false = trip/open)
-    std::vector<uint8_t> trip_frame = build_dlt645_relay_control_frame(meter_address, false);
-
-    // Send command and wait for response
-    bool success = send_dlt645_frame(trip_frame, this->frame_timeout_ms_);
-
-    if (success) {
-        ESP_LOGW(TAG, "✅ TRIP command sent, waiting for meter response...");
-    } else {
-        ESP_LOGE(TAG, "❌ TRIP command send failed");
-    }
-
-    return success;
+    ESP_LOGI(TAG, "✅ Relay TRIP request queued");
+    return true;
 }
 
 bool DLT645Component::relay_close_action()
 {
-    if (!this->uart_initialized_) {
-        ESP_LOGE(TAG, "❌ UART not initialized, cannot execute relay close operation");
+    if (this->request_queue_ == nullptr) {
+        ESP_LOGE(TAG, "❌ Request queue not initialized, cannot enqueue relay close request");
         return false;
     }
 
-    if (this->meter_address_bytes_.empty() ||
-        (this->meter_address_bytes_.size() == 6 && this->meter_address_bytes_[0] == 0x99)) {
-        ESP_LOGE(TAG, "❌ Meter address not discovered, cannot execute relay close operation");
+    ESP_LOGI(TAG, "🔌 Queuing relay CLOSE request...");
+
+    constexpr TickType_t enqueue_timeout_ticks = 0;
+    DLT645_REQUEST_TYPE request = DLT645_REQUEST_TYPE::CONTROL_RELAY_CONNECT;
+
+    if (xQueueSend(this->request_queue_, &request, enqueue_timeout_ticks) != pdTRUE) {
+        ESP_LOGE(TAG, "❌ Failed to enqueue relay close request");
         return false;
     }
 
-    ESP_LOGI(TAG, "🔌 Executing relay CLOSE operation...");
-
-    // Use current meter address
-    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
-
-    ESP_LOGI(TAG, "📡 Sending CLOSE command to meter address: %02X %02X %02X %02X %02X %02X",
-             meter_address[0], meter_address[1], meter_address[2],
-             meter_address[3], meter_address[4], meter_address[5]);
-
-    // Build close command frame (true = close)
-    std::vector<uint8_t> close_frame = build_dlt645_relay_control_frame(meter_address, true);
-
-    // Send command and wait for response
-    bool success = send_dlt645_frame(close_frame, this->frame_timeout_ms_);
-
-    if (success) {
-        ESP_LOGI(TAG, "✅ CLOSE command sent, waiting for meter response...");
-    } else {
-        ESP_LOGE(TAG, "❌ CLOSE command send failed");
-    }
-
-    return success;
+    ESP_LOGI(TAG, "✅ Relay CLOSE request queued");
+    return true;
 }
 
 bool DLT645Component::set_datetime_action()
 {
-    if (!this->uart_initialized_) {
-        ESP_LOGE(TAG, "❌ UART not initialized, cannot set meter datetime");
+    if (this->request_queue_ == nullptr) {
+        ESP_LOGE(TAG, "❌ Request queue not initialized, cannot enqueue set datetime request");
         return false;
     }
 
-    if (this->meter_address_bytes_.empty() ||
-        (this->meter_address_bytes_.size() == 6 && 
-         (this->meter_address_bytes_[0] == 0x99 || this->meter_address_bytes_[0] == 0xAA))) {
-        ESP_LOGE(TAG, "❌ Meter address not discovered or is broadcast address, cannot set datetime");
-        ESP_LOGE(TAG, "   Write operations require specific meter address (broadcast not allowed)");
+    ESP_LOGI(TAG, "🕐 Queuing SET DATETIME request...");
+
+    constexpr TickType_t enqueue_timeout_ticks = 0;
+    DLT645_REQUEST_TYPE request = DLT645_REQUEST_TYPE::WRITE_DATE;
+
+    if (xQueueSend(this->request_queue_, &request, enqueue_timeout_ticks) != pdTRUE) {
+        ESP_LOGE(TAG, "❌ Failed to enqueue set datetime request");
         return false;
     }
 
-    ESP_LOGI(TAG, "🕐 Setting meter date and time from system time...");
-
-    // Use current meter address
-    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
-
-    ESP_LOGI(TAG, "📡 Sending SET DATETIME command to meter address: %02X %02X %02X %02X %02X %02X",
-             meter_address[0], meter_address[1], meter_address[2],
-             meter_address[3], meter_address[4], meter_address[5]);
-
-    // Build write datetime command frame
-    std::vector<uint8_t> datetime_frame = build_dlt645_write_datetime_frame(meter_address);
-
-    // Send command and wait for response
-    // Use standard frame timeout (1 second)
-    bool success = send_dlt645_frame(datetime_frame, this->frame_timeout_ms_);
-
-    if (success) {
-        ESP_LOGI(TAG, "✅ SET DATETIME command sent, waiting for meter response...");
-        ESP_LOGI(TAG, "   Expected response: Control code 0x94 (write data success)");
-    } else {
-        ESP_LOGE(TAG, "❌ SET DATETIME command send failed");
-    }
-
-    return success;
+    ESP_LOGI(TAG, "✅ SET DATETIME request queued");
+    return true;
 }
 
 bool DLT645Component::set_time_action()
@@ -2024,8 +2058,11 @@ enum DLT645_REQUEST_TYPE DLT645Component::get_next_event_index()
         this->current_request_type = DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS;
         return this->current_request_type;
     }
-    //TODO create message queue during setup, and try to read current request type from it with timeout 4ms
-
+    DLT645_REQUEST_TYPE queued_request{};
+    if (xQueueReceive(this->request_queue_, &queued_request, pdMS_TO_TICKS(4)) == pdTRUE) {
+        this->current_request_type = queued_request;
+        return this->current_request_type;
+    }
 
     // Total power query with ratio control
     enum DLT645_REQUEST_TYPE next_request_type;
@@ -2039,7 +2076,7 @@ enum DLT645_REQUEST_TYPE DLT645Component::get_next_event_index()
         next_request_type = this->last_non_power_query_index_;
         // Advance non-power query index (cycle range: 2 to max_events_-1)
         uint32_t next_index = static_cast<uint32_t>(this->last_non_power_query_index_) + 1;
-        if (next_index >= static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_POS_END)) {
+        if (next_index > static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_POS_END)) {
             // Wrap around to voltage query (skip device address and power)
             next_index = static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE);
         }
