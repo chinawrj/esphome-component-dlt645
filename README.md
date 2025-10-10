@@ -1,103 +1,100 @@
-# Hello World Component for ESPHome
+# DLT645 Component for ESPHome
 
-这是一个用于演示ESPHome外部组件开发的Hello World示例组件。
+This is an ESPHome external component for DL/T 645-2007 smart meter communication protocol, supporting UART communication and real-time monitoring of various electrical parameters.
 
-## 功能特性
+## Features
 
-- 每5秒触发一次`hello_world`事件
-- 支持可配置的magic_number参数
-- 支持ESPHome自动化系统，可以使用`on_hello_world`触发器
-- 事件数据包含magic_number值
+- DL/T 645-2007 protocol implementation
+- FreeRTOS task-based architecture
+- UART communication support
+- Multiple data identifier support
+- Event-driven automation system
+- Thread-safe implementation
+- Real-time electrical parameter monitoring
 
-## 配置选项
+### Data Identifiers Supported
 
-| 选项 | 类型 | 默认值 | 描述 |
-|------|------|--------|------|
-| `magic_number` | `uint32` | `42` | 在hello_world事件中传递的魔法数字 |
-| `on_hello_world` | `Automation` | - | 当hello_world事件触发时执行的自动化动作 |
+- Device address query (0x04000401)
+- Total active power (0x02030000)
+- Forward active total energy (0x00010000)
+- Phase A voltage (0x02010100)
+- Phase A current (0x02020100)
+- Total power factor (0x02060000)
+- Grid frequency (0x02800002)
+- Reverse active total energy (0x00020000)
+- Date and time (0x04000101)
+- Hours, minutes, seconds (0x04000102)
 
-## 使用示例
+## Architecture
 
-### 基本配置
+The component uses:
+- FreeRTOS tasks for background processing
+- Event groups for task synchronization  
+- UART communication for DL/T 645 protocol
+- ESPHome automation integration
+- Thread-safe data caching
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `magic_number` | `uint32` | `42` | Magic number passed in hello_world event |
+| `power_ratio` | `int` | `10` | Query ratio control for total power vs other parameters |
+| `on_hello_world` | `Automation` | - | General event automation trigger |
+| `on_device_address` | `Automation` | - | Device address discovery event trigger |
+| `on_active_power` | `Automation` | - | Active power data event trigger |
+| `on_energy_active` | `Automation` | - | Active energy data event trigger |
+| `on_voltage_a` | `Automation` | - | Phase A voltage data event trigger |
+| `on_current_a` | `Automation` | - | Phase A current data event trigger |
+| `on_power_factor` | `Automation` | - | Power factor data event trigger |
+| `on_frequency` | `Automation` | - | Frequency data event trigger |
+| `on_energy_reverse` | `Automation` | - | Reverse energy data event trigger |
+| `on_datetime` | `Automation` | - | Date and time data event trigger |
+| `on_time_hms` | `Automation` | - | Time (hours, minutes, seconds) data event trigger |
+
+## Usage Example
+
+### Basic Configuration
 
 ```yaml
 external_components:
-  - source:
+  - source: 
       type: local
-      path: hello_world_component
+      path: components
 
-hello_world_component:
-  id: my_hello_world
-  magic_number: 123
-  on_hello_world:
-    then:
-      - logger.log: 
-          format: "收到Hello World事件! Magic Number: %d"
-          args: ['magic_number']
-```
-
-### 完整示例
-
-```yaml
 esphome:
-  name: hello-world-test
-  platform: esp32
+  name: smart-meter-reader
+
+esp32:
   board: esp32dev
 
 logger:
+  level: DEBUG
 
-wifi:
-  ssid: "your_wifi_name"
-  password: "your_wifi_password"
+# UART configuration for DL/T 645
+uart:
+  tx_pin: GPIO1
+  rx_pin: GPIO2
+  baud_rate: 2400
+  data_bits: 8
+  parity: EVEN
+  stop_bits: 1
 
-external_components:
-  - source:
-      type: local
-      path: hello_world_component
-
-hello_world_component:
-  id: my_hello_world
-  magic_number: 42
-  on_hello_world:
+dlt645_component:
+  magic_number: 123
+  power_ratio: 10
+  on_active_power:
     then:
       - logger.log: 
-          format: "🌍 Hello World! Magic Number: %d"
-          args: ['magic_number']
-      - switch.toggle: my_led
-
-switch:
-  - platform: gpio
-    pin: GPIO2
-    name: "LED"
-    id: my_led
+          format: "Active Power: %.2f W (DI: 0x%08X)"
+          args: ['power_watts', 'data_identifier']
+  on_voltage_a:
+    then:
+      - logger.log: 
+          format: "Phase A Voltage: %.1f V"
+          args: ['voltage_v']
 ```
 
-## 安装说明
+## License
 
-1. 在你的ESPHome配置目录中创建`hello_world_component`文件夹
-2. 将此组件的所有文件复制到该文件夹中
-3. 在你的ESPHome YAML文件中添加`external_components`配置
-4. 添加`hello_world_component`配置
-
-## 开发说明
-
-此组件演示了以下ESPHome组件开发概念：
-
-- **Python配置验证**: 使用`CONFIG_SCHEMA`验证YAML配置
-- **C++组件实现**: 继承自`Component`类，实现生命周期方法
-- **事件系统**: 使用`CallbackManager`实现事件回调
-- **自动化集成**: 使用`Trigger`类支持ESPHome自动化系统
-- **代码生成**: 使用`to_code`函数生成C++代码
-
-## API参考
-
-### HelloWorldComponent类
-
-#### 方法
-
-- `void set_magic_number(uint32_t magic_number)`: 设置魔法数字
-- `void add_on_hello_world_callback(callback)`: 添加hello_world事件回调
-
-#### 事件
-
-- `on_hello_world(magic_number)`: 每5秒触发，携带magic_number参数
+This component is provided as-is for educational and development purposes.
