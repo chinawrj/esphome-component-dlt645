@@ -226,8 +226,7 @@ void DLT645Component::dlt645_task_func(void* parameter)
     //  - DL/T 645 +
     while (component->task_running_) {
         // === 2. DL/T 645 （1s）===
-        component->get_next_event_index();
-        size_t current_index = component->get_current_event_index();
+        size_t current_index = component->get_next_event_index();
         uint32_t data_identifier = dlt645_data_identifiers[current_index];
         const char* event_name = dlt645_event_names[current_index];
 
@@ -1992,57 +1991,44 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
 
 // =============  =============
 
-void DLT645Component::get_next_event_index()
+size_t DLT645Component::get_next_event_index()
 {
     if (false == this->device_address_discovered_) {
+        //stick to 0 until address is discovered
         this->current_event_index_ = 0;
-        return;
+        return this->current_event_index_;
     }
     size_t next_index = (this->current_event_index_ + 1) % this->max_events_;
 
     if (next_index == 0 && this->device_address_discovered_) {
-        ESP_LOGD(TAG, "⏭️ ，");
-        next_index = 1; // （）
+        // skip 0 (device address discovery) after initial discovery
+        next_index = 1;
     }
 
-    if (this->device_address_discovered_) {
-        if (this->current_event_index_ == 1) {
-            this->total_power_query_count_++;
-            if (this->total_power_query_count_ < this->power_ratio_) {
-                ESP_LOGD(TAG, "🔋  (%d/%d)", this->total_power_query_count_, this->power_ratio_);
-                next_index = 1; //
-            } else {
-                ESP_LOGD(TAG, "🔄 Total power query ratio (%d)，", this->power_ratio_);
-
-                this->total_power_query_count_ = 0;
-                next_index = this->last_non_power_query_index_;
-
-                this->last_non_power_query_index_ = (this->last_non_power_query_index_ + 1);
-                if (this->last_non_power_query_index_ >= this->max_events_ || this->last_non_power_query_index_ <= 1) {
-                    this->last_non_power_query_index_ = 2;
-                }
+    if (this->current_event_index_ == 1) {
+        // Total power query with ratio control
+        this->total_power_query_count_++;
+        if (this->total_power_query_count_ < this->power_ratio_) {
+            ESP_LOGD(TAG, "🔋 Repeating total power query (%d/%d)", this->total_power_query_count_, this->power_ratio_);
+            next_index = 1;
+        } else {
+            ESP_LOGD(TAG, "🔄 Switching to non-power query after %d repeats", this->power_ratio_);
+            this->total_power_query_count_ = 0;
+            next_index = this->last_non_power_query_index_;
+            // Advance non-power query index (cycle range: 2 to max_events_-1)
+            this->last_non_power_query_index_++;
+            if (this->last_non_power_query_index_ >= this->max_events_) {
+                this->last_non_power_query_index_ = 2;
             }
         }
-        else if (this->current_event_index_ >= 2) {
-            ESP_LOGD(TAG, "🔄  (index=%d)，", this->current_event_index_);
-            next_index = 1; //
-        }
-    }
-
-    if (next_index == 0) {
-        ESP_LOGD(TAG, "🔄 DL/T 645，...");
-    } else if (next_index == 1 && this->device_address_discovered_) {
-        ESP_LOGD(TAG, "⚡  (index=1)");
-    } else if (next_index >= 2) {
-        ESP_LOGD(TAG, "📊  (index=%d)", next_index);
-    }
-
-    if (this->device_address_discovered_) {
-        ESP_LOGD(TAG, "📊  - : %d/%d, : %d", this->total_power_query_count_, this->power_ratio_,
-                 this->last_non_power_query_index_);
+    } else if (this->current_event_index_ >= 2) {
+        // Non-power queries always return to total power query
+        ESP_LOGD(TAG, "🔄 Returning to total power query from index %d", this->current_event_index_);
+        next_index = 1;
     }
 
     this->current_event_index_ = next_index;
+    return this->current_event_index_;
 }
 
 #endif // defined(USE_ESP32) || defined(USE_ESP_IDF)

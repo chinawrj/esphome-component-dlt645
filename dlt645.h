@@ -202,8 +202,7 @@ protected:
     std::vector<uint8_t> build_dlt645_broadcast_time_sync_frame(const std::vector<uint8_t>& address); // Broadcast: YY MM DD HH mm (5 bytes, C=0x08)
 
     // Event polling index management (internal use only)
-    void get_next_event_index(); // Get next event index (internally manages current_event_index_)
-    size_t get_current_event_index() const { return current_event_index_; } // Read-only access to current index
+    size_t get_next_event_index(); // Get next event index (internally manages current_event_index_)
     
     // Event polling state (private - cannot be accessed directly from outside)
     size_t max_events_{0};           // Maximum number of events (set during task initialization)
