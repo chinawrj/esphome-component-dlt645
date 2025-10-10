@@ -168,18 +168,18 @@ class DLT645Component : public Component {
   // （）
   CallbackManager<void(uint32_t)> hello_world_callback_;
   
-  // DL/T 645-2007 
-  CallbackManager<void(uint32_t)> device_address_callback_;    // 
-  CallbackManager<void(uint32_t, float)> active_power_callback_;      // 
-  CallbackManager<void(uint32_t, float)> warning_reverse_power_callback_;  // （>=0<0）
-  CallbackManager<void(uint32_t, float)> energy_active_callback_;     // 
-  CallbackManager<void(uint32_t, float)> voltage_a_callback_;         // A
-  CallbackManager<void(uint32_t, float)> current_a_callback_;         // A
-  CallbackManager<void(uint32_t, float)> power_factor_callback_;      // 
-  CallbackManager<void(uint32_t, float)> frequency_callback_;         // 
-  CallbackManager<void(uint32_t, float)> energy_reverse_callback_;    // 
-  CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)> datetime_callback_;          //  (DI, year, month, day, weekday)
-  CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t)> time_hms_callback_;          //  (DI, hour, minute, second)
+  // DL/T 645-2007 event callbacks
+  CallbackManager<void(uint32_t)> device_address_callback_;    // Device address
+  CallbackManager<void(uint32_t, float)> active_power_callback_;      // Total active power
+  CallbackManager<void(uint32_t, float)> warning_reverse_power_callback_;  // Reverse power warning (triggers only on >=0 to <0 transition)
+  CallbackManager<void(uint32_t, float)> energy_active_callback_;     // Total active energy
+  CallbackManager<void(uint32_t, float)> voltage_a_callback_;         // Phase A voltage
+  CallbackManager<void(uint32_t, float)> current_a_callback_;         // Phase A current
+  CallbackManager<void(uint32_t, float)> power_factor_callback_;      // Power factor
+  CallbackManager<void(uint32_t, float)> frequency_callback_;         // Grid frequency
+  CallbackManager<void(uint32_t, float)> energy_reverse_callback_;    // Reverse active energy
+  CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)> datetime_callback_;          // Date and time (DI, year, month, day, weekday)
+  CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t)> time_hms_callback_;          // Time HMS (DI, hour, minute, second)
   
   // FreeRTOS
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
@@ -235,23 +235,23 @@ class DLT645Component : public Component {
   float cached_power_factor_{0.0f};              // 
   float cached_frequency_hz_{0.0f};              //  (Hz)
   float cached_energy_reverse_kwh_{0.0f};        //  (kWh)
-  std::string cached_datetime_str_{""};          // 
-  std::string cached_time_hms_str_{""};          // 
+  std::string cached_datetime_str_{""};          // Date string
+  std::string cached_time_hms_str_{""};          // Time HMS string
   
-  // 
-  float last_active_power_w_{0.0f};              // W，>=0<0
-  bool power_direction_initialized_{false};      // 
+  // Reverse power detection state tracking
+  float last_active_power_w_{0.0f};              // Last power value in W, used to detect >=0 to <0 transition
+  bool power_direction_initialized_{false};      // Whether power direction state has been initialized
   
-  // 
-  uint32_t cached_year_{0};                      // 
-  uint32_t cached_month_{0};                     // 
-  uint32_t cached_day_{0};                       // 
-  uint32_t cached_weekday_{0};                   //  (1-7)
+  // Date components
+  uint32_t cached_year_{0};                      // Year
+  uint32_t cached_month_{0};                     // Month
+  uint32_t cached_day_{0};                       // Day
+  uint32_t cached_weekday_{0};                   // Weekday (1-7)
   
-  // 
-  uint32_t cached_hour_{0};                      // 
-  uint32_t cached_minute_{0};                    // 
-  uint32_t cached_second_{0};                    // 
+  // Time components
+  uint32_t cached_hour_{0};                      // Hour
+  uint32_t cached_minute_{0};                    // Minute
+  uint32_t cached_second_{0};                    // Second
 };
 
 // （）

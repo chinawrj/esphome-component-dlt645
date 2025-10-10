@@ -183,22 +183,22 @@ async def to_code(config):
     
     # DL/T 645-2007
     
-    #  (DI: 0x04000401)
+    # Device address query (DI: 0x04000401)
     for conf in config.get(CONF_ON_DEVICE_ADDRESS, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier")], conf)
     
-    #  (DI: 0x02030000) - ：data_identifier + power_watts (: W)
+    # Total active power (DI: 0x02030000) - Parameters: data_identifier + power_watts (Unit: W)
     for conf in config.get(CONF_ON_ACTIVE_POWER, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_watts")], conf)
     
-    #  (DI: 0x02030000) - >=0<0
+    # Reverse power warning (DI: 0x02030000) - Triggers only on >=0 to <0 transition
     for conf in config.get(CONF_ON_WARNING_REVERSE_POWER, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_watts")], conf)
     
-    #  (DI: 0x00010000) - ：data_identifier + energy_kwh (: kWh)
+    # Total active energy (DI: 0x00010000) - Parameters: data_identifier + energy_kwh (Unit: kWh)
     for conf in config.get(CONF_ON_ENERGY_ACTIVE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "energy_kwh")], conf)
