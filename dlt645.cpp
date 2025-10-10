@@ -773,56 +773,90 @@ void DLT645Component::check_and_parse_dlt645_frame()
     ESP_LOGD(TAG, "📦 DL/T 645");
 }
 
-// ============= DL/T 645-2007  =============
+// ============= DL/T 645-2007 Frame Builder =============
 
+/**
+ * @brief Build DL/T 645-2007 read data command frame (Master station request to read meter data)
+ * 
+ * Constructs a read data command frame according to DL/T 645-2007 protocol standard Section 7.1 "Transmission Frame Format".
+ * Frame format: [Preamble] [Start] [Address] [Start] [Control] [Length] [Data] [Checksum] [End]
+ * 
+ * @param address Meter address (6 bytes, BCD format, LSB first / Little-Endian)
+ *                - Unicast address: Specific meter address (e.g., 12 90 78 56 34 12 for meter ID 123456789012)
+ *                - Broadcast address: 99 99 99 99 99 99 or AA AA AA AA AA AA
+ * @param data_identifier Data identifier (4 bytes, LSB first), refer to DL/T 645-2007 Appendix A
+ *                        Examples: 0x02010100 = Phase A Voltage
+ *                                 0x02030000 = Total Active Power
+ *                                 0x00010000 = Total Active Energy
+ * @return Complete DL/T 645-2007 read data command frame ready for UART transmission
+ */
 std::vector<uint8_t> DLT645Component::build_dlt645_read_frame(const std::vector<uint8_t>& address,
                                                               uint32_t data_identifier)
 {
     std::vector<uint8_t> frame;
 
-    // 1.  (，)
+    // 1. Preamble (0xFE) - Protocol Section 7.1.1
+    // Purpose: Wake up receiver and prepare for data reception (optional, 0-4 bytes)
+    // Some meters don't require preamble, some need 1-4 preamble bytes
     frame.push_back(0xFE);
     frame.push_back(0xFE);
 
-    // 2.
+    // 2. Start delimiter (0x68) - Protocol Section 7.1.2
+    // Marks the beginning of a frame
     frame.push_back(0x68);
 
-    // 3.  (6，LSB)
+    // 3. Address field A0-A5 (6 bytes) - Protocol Section 7.1.3
+    // BCD format, low byte first (Little-Endian)
+    // Example: Meter ID 123456789012 → A0=12H A1=90H A2=78H A3=56H A4=34H A5=12H
     for (size_t i = 0; i < 6 && i < address.size(); i++) {
         frame.push_back(address[i]);
     }
 
-    // 4.
+    // 4. Second start delimiter (0x68) - Protocol Section 7.1.2
+    // Enhances transmission reliability, helps verify correct address field reception
     frame.push_back(0x68);
 
-    // 5.  (0x11 = )
+    // 5. Control code C (1 byte) - Protocol Section 7.1.4
+    // Bit7-6: Transfer direction (0=sent by master station)
+    // Bit5: Slave abnormal response flag (0=normal)  
+    // Bit4: Subsequent frame flag (0=no subsequent frames)
+    // Bit3-0: Function code (0001=read data)
+    // 0x11 = 0001 0001 = Master station read data command
     frame.push_back(0x11);
 
-    // 6.  (4)
+    // 6. Data length L (1 byte) - Protocol Section 7.1.5
+    // Number of bytes in data field, fixed at 4 for read data command (data identifier length)
     frame.push_back(0x04);
 
-    // 7. ： (4，LSB，0x33)
+    // 7. Data field DATA - Protocol Section 7.1.6
+    // Data identifier DI3 DI2 DI1 DI0 (4 bytes, low byte first)
+    // CRITICAL: Each byte must be scrambled by adding 0x33 during transmission (Protocol Section 7.1.6.1)
+    // Example: DI=0x02010100 → Transmitted as 33 34 34 35
     uint8_t di_bytes[4];
-    di_bytes[0] = (data_identifier & 0xFF) + 0x33;
-    di_bytes[1] = ((data_identifier >> 8) & 0xFF) + 0x33;
-    di_bytes[2] = ((data_identifier >> 16) & 0xFF) + 0x33;
-    di_bytes[3] = ((data_identifier >> 24) & 0xFF) + 0x33;
+    di_bytes[0] = (data_identifier & 0xFF) + 0x33;         // DI0 + 0x33
+    di_bytes[1] = ((data_identifier >> 8) & 0xFF) + 0x33;  // DI1 + 0x33
+    di_bytes[2] = ((data_identifier >> 16) & 0xFF) + 0x33; // DI2 + 0x33
+    di_bytes[3] = ((data_identifier >> 24) & 0xFF) + 0x33; // DI3 + 0x33
 
     for (int i = 0; i < 4; i++) {
         frame.push_back(di_bytes[i]);
     }
 
-    // 8.  (0x68256)
+    // 8. Checksum CS (1 byte) - Protocol Section 7.1.7
+    // Modulo 256 sum of all bytes from first start delimiter (0x68) to checksum (exclusive)
+    // Preamble bytes are NOT included in checksum calculation
     uint8_t checksum = 0;
-    for (size_t i = 2; i < frame.size(); i++) { //
+    for (size_t i = 2; i < frame.size(); i++) { // Skip 2 preamble bytes (0xFE)
         checksum += frame[i];
     }
     frame.push_back(checksum);
 
-    // 9.
+    // 9. End delimiter (0x16) - Protocol Section 7.1.8
+    // Marks the end of a frame
     frame.push_back(0x16);
 
-    ESP_LOGD(TAG, "🔧 DL/T 645: =%02X%02X%02X%02X%02X%02X, DI=0x%08X", address[0], address[1], address[2], address[3],
+    // Debug log: Display constructed frame information
+    ESP_LOGD(TAG, "🔧 Build DL/T 645 read frame: Address=%02X%02X%02X%02X%02X%02X, DataID=0x%08X", address[0], address[1], address[2], address[3],
              address[4], address[5], data_identifier);
 
     return frame;
