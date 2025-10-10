@@ -5,6 +5,7 @@
 #include "esphome/core/log.h"
 
 #include <cassert>
+#include <cstdint>
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
 #include "esp_log.h"
@@ -18,6 +19,35 @@ namespace esphome {
 namespace dlt645_component {
 
 static const char* const TAG = "dlt645_component";
+
+struct dlt645_request_info {
+    const char* name;
+    enum DLT645_REQUEST_TYPE request_type;
+    union {
+        enum DLT645_DATA_IDENTIFIER data_identifier;
+    };
+};
+
+static struct dlt645_request_info dlt645_request_infos[] = {
+    //read Data Identifier section
+    {"Device Address", DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS, DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS},
+    {"Active Power Total", DLT645_REQUEST_TYPE::READ_ACTIVE_POWER_TOTAL, DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL},
+    {"Energy Active Total", DLT645_REQUEST_TYPE::READ_ENERGY_ACTIVE_TOTAL, DLT645_DATA_IDENTIFIER::ENERGY_ACTIVE_TOTAL},
+    {"Voltage A Phase", DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE, DLT645_DATA_IDENTIFIER::VOLTAGE_A_PHASE},
+    {"Current A Phase", DLT645_REQUEST_TYPE::READ_CURRENT_A_PHASE, DLT645_DATA_IDENTIFIER::CURRENT_A_PHASE},
+    {"Power Factor Total", DLT645_REQUEST_TYPE::READ_POWER_FACTOR_TOTAL, DLT645_DATA_IDENTIFIER::POWER_FACTOR_TOTAL},
+    {"Frequency", DLT645_REQUEST_TYPE::READ_FREQUENCY, DLT645_DATA_IDENTIFIER::FREQUENCY},
+    {"Energy Reverse Total", DLT645_REQUEST_TYPE::READ_ENERGY_REVERSE_TOTAL, DLT645_DATA_IDENTIFIER::ENERGY_REVERSE_TOTAL},
+    {"DateTime", DLT645_REQUEST_TYPE::READ_DATE, DLT645_DATA_IDENTIFIER::DATETIME},
+    {"Time HMS", DLT645_REQUEST_TYPE::READ_TIME, DLT645_DATA_IDENTIFIER::TIME_HMS},
+    //write Data Identifier section
+    {"Write Date", DLT645_REQUEST_TYPE::WRITE_DATE, DLT645_DATA_IDENTIFIER::DATETIME},
+    {"Write Time", DLT645_REQUEST_TYPE::WRITE_TIME, DLT645_DATA_IDENTIFIER::TIME_HMS},
+    //control command section
+    {"Relay Connect", DLT645_REQUEST_TYPE::CONTROL_RELAY_CONNECT, DLT645_DATA_IDENTIFIER::UNKNOWN},
+    {"Relay Disconnect", DLT645_REQUEST_TYPE::CONTROL_RELAY_DISCONNECT, DLT645_DATA_IDENTIFIER::UNKNOWN},
+};
+
 
 // Cross-platform function to get milliseconds
 uint32_t get_current_time_ms()
@@ -198,21 +228,6 @@ void DLT645Component::dlt645_task_func(void* parameter)
         EVENT_DI_TIME_HMS              // BIT10:  (0x04000102)
     };
 
-    const char* dlt645_event_names[] = {"", "", "", "A", "A", "", "", "", "", ""};
-
-    const uint32_t dlt645_data_identifiers[] = {
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::DEVICE_ADDRESS),       //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL),   //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_ACTIVE_TOTAL),  //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::VOLTAGE_A_PHASE),      // A
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::CURRENT_A_PHASE),      // A
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::POWER_FACTOR_TOTAL),   //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::FREQUENCY),            //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_REVERSE_TOTAL), //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::DATETIME),             //
-        static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::TIME_HMS)              //
-    };
-
     const size_t num_dlt645_events = sizeof(dlt645_event_bits) / sizeof(dlt645_event_bits[0]);
     
     // 初始化组件的事件管理参数
@@ -226,9 +241,22 @@ void DLT645Component::dlt645_task_func(void* parameter)
     //  - DL/T 645 +
     while (component->task_running_) {
         // === 2. DL/T 645 （1s）===
-        size_t current_index = component->get_next_event_index();
-        uint32_t data_identifier = dlt645_data_identifiers[current_index];
-        const char* event_name = dlt645_event_names[current_index];
+        enum DLT645_REQUEST_TYPE next_request_type = component->get_next_event_index();
+        size_t request_index = sizeof(dlt645_request_infos) / sizeof(dlt645_request_infos[0]);
+        for (size_t i = 0; i < sizeof (dlt645_request_infos) / sizeof(dlt645_request_infos[0]); i++) {
+            if (dlt645_request_infos[i].request_type == next_request_type) {
+                request_index = i;
+                break;
+            }
+        }
+        if (request_index == sizeof(dlt645_request_infos) / sizeof(dlt645_request_infos[0])) {
+            ESP_LOGE(TAG, "❌ DL/T 645: Unknown request type %d", next_request_type);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        uint32_t data_identifier = static_cast<uint32_t>(dlt645_request_infos[request_index].data_identifier);
+        const char* event_name = dlt645_request_infos[request_index].name;
 
         ESP_LOGD(TAG, "📡 [%d/%d] DL/T 645: %s (DI: 0x%08X)", current_index + 1, num_dlt645_events, event_name,
                  data_identifier);
@@ -1977,7 +2005,7 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
                 this->cached_time_hms_str_ = std::string(time_hms_str);
                 xEventGroupSetBits(this->event_group_, EVENT_DI_TIME_HMS);
             } else {
-                ESP_LOGW(TAG, "⚠️ ");
+                ESP_LOGW(TAG, "⚠️ : %d", actual_data.size());
             }
             break;
         }
@@ -1989,46 +2017,34 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
     }
 }
 
-// =============  =============
-
-size_t DLT645Component::get_next_event_index()
+enum DLT645_REQUEST_TYPE DLT645Component::get_next_event_index()
 {
     if (false == this->device_address_discovered_) {
-        //stick to 0 until address is discovered
-        this->current_event_index_ = 0;
-        return this->current_event_index_;
-    }
-    size_t next_index = (this->current_event_index_ + 1) % this->max_events_;
-
-    if (next_index == 0 && this->device_address_discovered_) {
-        // skip 0 (device address discovery) after initial discovery
-        next_index = 1;
+        //stick to read device address until address is discovered
+        this->current_request_type = DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS;
+        return this->current_request_type;
     }
 
-    if (this->current_event_index_ == 1) {
-        // Total power query with ratio control
-        this->total_power_query_count_++;
-        if (this->total_power_query_count_ < this->power_ratio_) {
-            ESP_LOGD(TAG, "🔋 Repeating total power query (%d/%d)", this->total_power_query_count_, this->power_ratio_);
-            next_index = 1;
-        } else {
-            ESP_LOGD(TAG, "🔄 Switching to non-power query after %d repeats", this->power_ratio_);
-            this->total_power_query_count_ = 0;
-            next_index = this->last_non_power_query_index_;
-            // Advance non-power query index (cycle range: 2 to max_events_-1)
-            this->last_non_power_query_index_++;
-            if (this->last_non_power_query_index_ >= this->max_events_) {
-                this->last_non_power_query_index_ = 2;
-            }
+    // Total power query with ratio control
+    enum DLT645_REQUEST_TYPE next_request_type;
+    this->total_power_query_count_++;
+    if (this->total_power_query_count_ < this->power_ratio_) {
+        ESP_LOGD(TAG, "🔋 Repeating total power query (%d/%d)", this->total_power_query_count_, this->power_ratio_);
+        next_request_type = DLT645_REQUEST_TYPE::READ_ACTIVE_POWER_TOTAL;
+    } else {
+        ESP_LOGD(TAG, "🔄 Switching to non-power query after %d repeats", this->power_ratio_);
+        this->total_power_query_count_ = 0;
+        next_request_type = this->last_non_power_query_index_;
+        // Advance non-power query index (cycle range: 2 to max_events_-1)
+        uint32_t next_index = static_cast<uint32_t>(this->last_non_power_query_index_) + 1;
+        if (next_index >= static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_POS_END)) {
+            // Wrap around to voltage query (skip device address and power)
+            next_index = static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE);
         }
-    } else if (this->current_event_index_ >= 2) {
-        // Non-power queries always return to total power query
-        ESP_LOGD(TAG, "🔄 Returning to total power query from index %d", this->current_event_index_);
-        next_index = 1;
+        this->last_non_power_query_index_ = static_cast<enum DLT645_REQUEST_TYPE>(next_index);
     }
-
-    this->current_event_index_ = next_index;
-    return this->current_event_index_;
+    this->current_request_type = next_request_type;
+    return this->current_request_type;
 }
 
 #endif // defined(USE_ESP32) || defined(USE_ESP_IDF)

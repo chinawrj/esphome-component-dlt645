@@ -34,6 +34,7 @@ constexpr uint32_t DLT645_TRIGGER_INTERVAL_MS = 5000; // 5 second interval
 // DL/T 645-2007 data identifier enumeration definitions
 enum class DLT645_DATA_IDENTIFIER : uint32_t
 {
+    UNKNOWN = 0x00000000,              // Unknown/undefined
     DEVICE_ADDRESS = 0x04000401,       // Device address query
     ACTIVE_POWER_TOTAL = 0x02030000,   // Total active power
     ENERGY_ACTIVE_TOTAL = 0x00010000,  // Forward active total energy
@@ -44,6 +45,34 @@ enum class DLT645_DATA_IDENTIFIER : uint32_t
     ENERGY_REVERSE_TOTAL = 0x00020000, // Reverse active total energy
     DATETIME = 0x04000101,             // Date and time
     TIME_HMS = 0x04000102              // Hours, minutes, seconds
+};
+
+// DL/T 645-2007 request type for service code
+// we use this as the index of array, so do not make it too sparse
+enum class DLT645_REQUEST_TYPE : uint32_t
+{
+    READ_POS_START = 0x01,              // Read starting from position
+    READ_DEVICE_ADDRESS = 0x01,         // Read device address
+    READ_ACTIVE_POWER_TOTAL = 0x02,     // Read total active power
+    READ_ENERGY_ACTIVE_TOTAL = 0x03,    // Read forward active total energy
+    READ_VOLTAGE_A_PHASE = 0x04,        // Read phase A voltage
+    READ_CURRENT_A_PHASE = 0x05,        // Read phase A current
+    READ_POWER_FACTOR_TOTAL = 0x06,     // Read total power factor
+    READ_FREQUENCY = 0x07,              // Read grid frequency
+    READ_ENERGY_REVERSE_TOTAL = 0x08,   // Read reverse active total energy
+    READ_DATE = 0x09,                   // Read date
+    READ_TIME = 0x0A,                   // Read time
+    READ_POS_END = 0x0A,                // Read ending at position
+    READ_MAX_EVENTS = READ_POS_END,     // Maximum read events (for cycling)
+
+    WRITE_POS_START = 0x10,             // Write starting from position
+    WRITE_DATE = 0x10,                  // Write date (WW DD MM YY)
+    WRITE_TIME = 0x11,                  // Write time
+
+    CONTROL_POS_START = 0x20,           // Control starting from position
+    CONTROL_BROADCAST_TIME_SYNC = 0x21, // Broadcast time synchronization
+    CONTROL_RELAY_CONNECT = 0x22,       // Relay connect
+    CONTROL_RELAY_DISCONNECT = 0x23     // Relay disconnect
 };
 
 // Event Group event bit definitions - Event bits corresponding to DL/T 645-2007 data identifiers
@@ -202,24 +231,23 @@ protected:
     std::vector<uint8_t> build_dlt645_broadcast_time_sync_frame(const std::vector<uint8_t>& address); // Broadcast: YY MM DD HH mm (5 bytes, C=0x08)
 
     // Event polling index management (internal use only)
-    size_t get_next_event_index(); // Get next event index (internally manages current_event_index_)
+    enum DLT645_REQUEST_TYPE get_next_event_index();
     
     // Event polling state (private - cannot be accessed directly from outside)
     size_t max_events_{0};           // Maximum number of events (set during task initialization)
 #endif
 
 private:
-    // Event index - MUST NOT be accessed directly from outside (only via get_next_event_index)
-    size_t current_event_index_{0};  // Current event index (strictly private, managed only by get_next_event_index internally)
+    enum DLT645_REQUEST_TYPE current_request_type{DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS};
     
 protected:
 
     uint32_t magic_number_{42};
 
     // Query ratio control
-    int power_ratio_{10};                  // 10:1，101
-    int total_power_query_count_{0};       //
-    size_t last_non_power_query_index_{2}; // ""（2，）
+    int power_ratio_{10};
+    int total_power_query_count_{0};
+    enum DLT645_REQUEST_TYPE last_non_power_query_index_{DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE};
 
     // （）
     CallbackManager<void(uint32_t)> hello_world_callback_;
