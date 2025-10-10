@@ -201,13 +201,19 @@ protected:
     std::vector<uint8_t> build_dlt645_write_time_frame(const std::vector<uint8_t>& address);     // Time: HH mm SS (3 bytes, DI=0x04000102)
     std::vector<uint8_t> build_dlt645_broadcast_time_sync_frame(const std::vector<uint8_t>& address); // Broadcast: YY MM DD HH mm (5 bytes, C=0x08)
 
-    // Event polling index management
-    void get_next_event_index(); // 获取下一个事件索引（内部管理 current_event_index_）
+    // Event polling index management (internal use only)
+    void get_next_event_index(); // Get next event index (internally manages current_event_index_)
+    size_t get_current_event_index() const { return current_event_index_; } // Read-only access to current index
     
-    // Event polling state (accessed by task function only)
-    size_t current_event_index_{0};  // 当前事件索引（由 get_next_event_index 内部管理）
-    size_t max_events_{0};           // 最大事件数量（在任务初始化时设置）
+    // Event polling state (private - cannot be accessed directly from outside)
+    size_t max_events_{0};           // Maximum number of events (set during task initialization)
 #endif
+
+private:
+    // Event index - MUST NOT be accessed directly from outside (only via get_next_event_index)
+    size_t current_event_index_{0};  // Current event index (strictly private, managed only by get_next_event_index internally)
+    
+protected:
 
     uint32_t magic_number_{42};
 

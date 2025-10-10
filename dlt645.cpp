@@ -227,10 +227,11 @@ void DLT645Component::dlt645_task_func(void* parameter)
     while (component->task_running_) {
         // === 2. DL/T 645 （1s）===
         component->get_next_event_index();
-        uint32_t data_identifier = dlt645_data_identifiers[component->current_event_index_];
-        const char* event_name = dlt645_event_names[component->current_event_index_];
+        size_t current_index = component->get_current_event_index();
+        uint32_t data_identifier = dlt645_data_identifiers[current_index];
+        const char* event_name = dlt645_event_names[current_index];
 
-        ESP_LOGD(TAG, "📡 [%d/%d] DL/T 645: %s (DI: 0x%08X)", component->current_event_index_ + 1, num_dlt645_events, event_name,
+        ESP_LOGD(TAG, "📡 [%d/%d] DL/T 645: %s (DI: 0x%08X)", current_index + 1, num_dlt645_events, event_name,
                  data_identifier);
 
         // data_identifier，
