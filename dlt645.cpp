@@ -243,11 +243,8 @@ void DLT645Component::dlt645_task_func(void* parameter)
             // use power query to discover address
             send_success = component->query_active_power_total();
 #endif
-        } else if (di_enum == DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL) {
-            component->switch_baud_rate_when_failed_ = false;
-            send_success = component->query_active_power_total();
         } else {
-            //  - Broadcast address
+            // Unified code path for all data identifier queries (including ACTIVE_POWER_TOTAL)
             component->switch_baud_rate_when_failed_ = false;
             std::vector<uint8_t> query_address = component->meter_address_bytes_;
             if (query_address.empty()) {
@@ -537,6 +534,8 @@ bool DLT645Component::send_dlt645_frame(const std::vector<uint8_t>& frame_data, 
     uart_flush_input(this->uart_port_);
     this->response_buffer_.clear();
 
+    // Dump frame data
+    ESP_LOGI(TAG, "📦 DL/T 645 frame data: %s", hex_frame.c_str());
     int bytes_written = uart_write_bytes(this->uart_port_, frame_data.data(), frame_data.size());
 
     if (bytes_written != frame_data.size()) {
@@ -626,10 +625,6 @@ void DLT645Component::process_uart_data()
 
 void DLT645Component::check_and_parse_dlt645_frame()
 {
-    if (this->response_buffer_.size() < 12) {
-        return;
-    }
-
     ESP_LOGD(TAG, "📦 DL/T 645 (%d)", this->response_buffer_.size());
 
     std::string hex_data = "";
@@ -657,7 +652,7 @@ void DLT645Component::check_and_parse_dlt645_frame()
     //  (:  + 6 +  +  +  +  + )
     size_t required_length = frame_start + 12;
     if (this->response_buffer_.size() < required_length) {
-        ESP_LOGD(TAG, "📦 ，...");
+        ESP_LOGW(TAG, "📦 ，...");
         return;
     }
 
@@ -679,30 +674,60 @@ void DLT645Component::check_and_parse_dlt645_frame()
     uint8_t control_code = this->response_buffer_[idx + 8];
     uint8_t data_length = this->response_buffer_[idx + 9];
 
-    ESP_LOGD(TAG, "📋 : %02X %02X %02X %02X %02X %02X, : 0x%02X, : %d", address[0], address[1], address[2], address[3],
-             address[4], address[5], control_code, data_length);
+    ESP_LOGI(TAG, "📋 Frame parsed: Address=%02X %02X %02X %02X %02X %02X, Control=0x%02X, DataLen=%d", 
+             address[0], address[1], address[2], address[3], address[4], address[5], control_code, data_length);
 
-    //  (0x91)  (0xD1/0xB1)
+    // Check for error responses (0xD1, 0xB1 for read errors, 0xDC, 0xBC for control errors)
     if (control_code == 0xD1 || control_code == 0xB1) {
-        ESP_LOGW(TAG, "⚠️ ，: 0x%02X", control_code);
+        ESP_LOGW(TAG, "⚠️ Meter returned READ ERROR response, control code: 0x%02X", control_code);
+        this->response_buffer_.clear();
+        return;
+    }
+    
+    if (control_code == 0xDC || control_code == 0xBC) {
+        ESP_LOGE(TAG, "❌ Meter returned CONTROL ERROR response, control code: 0x%02X", control_code);
+        // Extract error code if available
+        if (data_length > 0 && data_length < 10) {
+            ESP_LOGE(TAG, "   Error details: data_length=%d", data_length);
+            // Print error data field
+            std::string error_hex = "";
+            for (int i = 0; i < data_length && (idx + 10 + i) < this->response_buffer_.size(); i++) {
+                char hex_str[4];
+                sprintf(hex_str, "%02X ", this->response_buffer_[idx + 10 + i]);
+                error_hex += hex_str;
+            }
+            ESP_LOGE(TAG, "   Error data: %s", error_hex.c_str());
+        }
         this->response_buffer_.clear();
         return;
     }
 
-    if (control_code != 0x91) {
-        ESP_LOGW(TAG, "⚠️ : 0x%02X", control_code);
+    // Check for valid response codes: 0x91 (read data response) or 0x9C (control command response)
+    if (control_code != 0x91 && control_code != 0x9C) {
+        ESP_LOGW(TAG, "⚠️ Unknown control code: 0x%02X (expected 0x91 for read or 0x9C for control)", control_code);
+        this->response_buffer_.clear();
+        return;
+    }
+    
+    // Special handling for control command responses (0x9C)
+    if (control_code == 0x9C) {
+        if (data_length == 0) {
+            ESP_LOGI(TAG, "✅ Control command executed successfully (0x9C, data_length=0)");
+        } else {
+            ESP_LOGI(TAG, "✅ Control command response received (0x9C, data_length=%d)", data_length);
+        }
         this->response_buffer_.clear();
         return;
     }
 
     size_t frame_total_length = idx + 10 + data_length + 2; // +2 for checksum and end delimiter
     if (this->response_buffer_.size() < frame_total_length) {
-        ESP_LOGD(TAG, "📦  ( %d ， %d )", frame_total_length, this->response_buffer_.size());
+        ESP_LOGW(TAG, "📦 Frame incomplete (expected %d bytes, got %d)", frame_total_length, this->response_buffer_.size());
         return;
     }
 
     if (this->response_buffer_[frame_total_length - 1] != 0x16) {
-        ESP_LOGW(TAG, "⚠️  (0x16) : 0x%02X", this->response_buffer_[frame_total_length - 1]);
+        ESP_LOGW(TAG, "⚠️ Invalid end delimiter (expected 0x16): 0x%02X", this->response_buffer_[frame_total_length - 1]);
         this->response_buffer_.clear();
         return;
     }
@@ -714,26 +739,26 @@ void DLT645Component::check_and_parse_dlt645_frame()
     uint8_t received_checksum = this->response_buffer_[idx + 10 + data_length];
 
     if (calculated_checksum != received_checksum) {
-        ESP_LOGW(TAG, "⚠️  (: 0x%02X, : 0x%02X)", calculated_checksum, received_checksum);
+        ESP_LOGW(TAG, "⚠️ Checksum mismatch (calculated: 0x%02X, received: 0x%02X)", calculated_checksum, received_checksum);
         this->response_buffer_.clear();
         return;
     }
 
-    ESP_LOGD(TAG, "✅ DL/T 645，");
+    ESP_LOGD(TAG, "✅ DL/T 645 frame validation passed");
 
     std::vector<uint8_t> data_field(data_length);
     for (int i = 0; i < data_length; i++) {
         data_field[i] = this->response_buffer_[idx + 10 + i];
     }
 
-    //  ( 0x33)
+    // Unscramble data field (subtract 0x33 from each byte)
     unscramble_dlt645_data(data_field);
 
-    //  (4，LSB)
+    // Extract data identifier (4 bytes, LSB first)
     if (data_length >= 4) {
         uint32_t data_identifier = data_field[0] | (data_field[1] << 8) | (data_field[2] << 16) | (data_field[3] << 24);
 
-        ESP_LOGD(TAG, "🎯 : 0x%08X", data_identifier);
+        ESP_LOGD(TAG, "🎯 Data Identifier: 0x%08X", data_identifier);
 
         parse_dlt645_data_by_identifier(data_identifier, data_field);
     }
@@ -862,7 +887,458 @@ std::vector<uint8_t> DLT645Component::build_dlt645_read_frame(const std::vector<
     return frame;
 }
 
-// /
+/**
+ * @brief Build DL/T 645-2007 generic write data command frame
+ * 
+ * Constructs a write data command frame according to DL/T 645-2007 protocol standard.
+ * This is a generic write frame builder that can be used for various write operations:
+ * - Setting date/time (DI: 0x04000101)
+ * - Modifying parameters
+ * - Password configuration
+ * - Any other write operations defined in DL/T 645-2007
+ * 
+ * Frame format: [Preamble] [Start] [Address] [Start] [Control] [Length] [Data] [Checksum] [End]
+ * 
+ * Control Code: 0x14 (Write data command)
+ * Data Field Structure:
+ *   - DI3-DI0 (4 bytes): Data identifier (LSB first)
+ *   - Data (n bytes): Data content to write (will be scrambled with +0x33)
+ * 
+ * @param address Meter address (6 bytes, BCD format, LSB first)
+ * @param data_identifier Data identifier (4 bytes, LSB first), refer to DL/T 645-2007 Appendix A
+ * @param write_data Raw data to write (will be automatically scrambled inside this function)
+ * @return Complete DL/T 645-2007 write data command frame ready for UART transmission
+ * 
+ * @note Data will be automatically scrambled (+0x33) before transmission
+ * @warning Broadcast address (AA AA AA AA AA AA or 99 99 99 99 99 99) is NOT allowed for write operations
+ * @warning Some meters may require password authorization for certain write operations
+ * 
+ * @example Setting date/time (2025-10-10 15:30):
+ *   std::vector<uint8_t> datetime_data = {0x19, 0x0A, 0x0A, 0x0F, 0x1E}; // YY MM DD HH mm (BCD, not scrambled)
+ *   auto frame = build_dlt645_write_frame(address, 0x04000101, datetime_data);
+ */
+std::vector<uint8_t> DLT645Component::build_dlt645_write_frame(const std::vector<uint8_t>& address,
+                                                                uint32_t data_identifier,
+                                                                const std::vector<uint8_t>& write_data)
+{
+    std::vector<uint8_t> frame;
+
+    // 1. Preamble (0xFE) - Wake up receiver
+    frame.insert(frame.end(), {0xFE, 0xFE, 0xFE, 0xFE});
+
+    // 2. Start delimiter (0x68)
+    frame.push_back(0x68);
+
+    // 3. Address field (6 bytes)
+    for (size_t i = 0; i < 6 && i < address.size(); i++) {
+        frame.push_back(address[i]);
+    }
+
+    // 4. Second start delimiter (0x68)
+    frame.push_back(0x68);
+
+    // 5. Control code: 0x14 (Write data command)
+    // 0x14 = 0001 0100
+    // Bit7-6: 00 = Master station
+    // Bit5: 0 = Normal operation
+    // Bit4: 1 = Has data
+    // Bit3-0: 0100 = Write data
+    frame.push_back(0x14);
+
+    // 6. Data length: 4 bytes (DI) + write_data.size()
+    uint8_t data_length = 4 + write_data.size();
+    frame.push_back(data_length);
+
+    // 7. Data field (will be scrambled with +0x33)
+    // DI3-DI0: Data identifier (4 bytes, LSB first)
+    frame.push_back((data_identifier & 0xFF) + 0x33);         // DI0
+    frame.push_back(((data_identifier >> 8) & 0xFF) + 0x33);  // DI1
+    frame.push_back(((data_identifier >> 16) & 0xFF) + 0x33); // DI2
+    frame.push_back(((data_identifier >> 24) & 0xFF) + 0x33); // DI3
+
+    // Data content (scramble each byte with +0x33)
+    for (size_t i = 0; i < write_data.size(); i++) {
+        frame.push_back(write_data[i] + 0x33);
+    }
+
+    // 8. Checksum CS (1 byte)
+    // Calculate from first 0x68 (skip 4 preamble bytes)
+    uint8_t checksum = 0;
+    for (size_t i = 4; i < frame.size(); i++) {  // Start from first 0x68
+        checksum += frame[i];
+    }
+    frame.push_back(checksum);
+
+    // 9. End delimiter (0x16)
+    frame.push_back(0x16);
+
+    // Debug log
+    ESP_LOGD(TAG, "🔧 Build DL/T 645 generic write frame: Address=%02X%02X%02X%02X%02X%02X, DI=0x%08X, DataLen=%d",
+             address[0], address[1], address[2], address[3], address[4], address[5],
+             data_identifier, write_data.size());
+
+    return frame;
+}
+
+/**
+ * @brief Build DL/T 645-2007 date/time write command frame (Set meter date and time)
+ * 
+ * This is a convenience wrapper that uses the generic build_dlt645_write_frame() function.
+ * Automatically retrieves current system time and formats it as BCD data.
+ * 
+ * @param address Meter address (6 bytes, BCD format, LSB first)
+ * @return Complete DL/T 645-2007 write datetime command frame ready for UART transmission
+ * 
+ * @note Automatically retrieves current system time via time() function
+ * @warning Some meters may require password authorization for write operations
+ * @warning Broadcast address is NOT allowed for write operations
+ */
+std::vector<uint8_t> DLT645Component::build_dlt645_write_datetime_frame(const std::vector<uint8_t>& address)
+{
+    // Prepare date data in BCD format (4 bytes: WW DD MM YY)
+    // DL/T 645-2007: DI=0x04000101 uses 4-byte format for DATE ONLY
+    std::vector<uint8_t> datetime_data;
+
+#if defined(USE_ESP32) || defined(USE_ESP_IDF)
+    // Get current system time
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    // Convert to BCD format (NOT scrambled yet - will be scrambled in build_dlt645_write_frame)
+    
+    // Byte 0: Week (WW) - day of week (0=Sunday, 1=Monday, ..., 6=Saturday)
+    // tm_wday: 0=Sunday, 1=Monday, ..., 6=Saturday
+    uint8_t week_bcd = ((timeinfo.tm_wday / 10) << 4) | (timeinfo.tm_wday % 10);
+    datetime_data.push_back(week_bcd);
+
+    // Byte 1: Day (DD) - day of month
+    uint8_t day_bcd = ((timeinfo.tm_mday / 10) << 4) | (timeinfo.tm_mday % 10);
+    datetime_data.push_back(day_bcd);
+
+    // Byte 2: Month (MM)
+    int month = timeinfo.tm_mon + 1;  // tm_mon is 0-11
+    uint8_t mon_bcd = ((month / 10) << 4) | (month % 10);
+    datetime_data.push_back(mon_bcd);
+
+    // Byte 3: Year (YY) - last 2 digits
+    int year = (timeinfo.tm_year + 1900) % 100;
+    uint8_t year_bcd = ((year / 10) << 4) | (year % 10);
+    datetime_data.push_back(year_bcd);
+
+    // Convert day of week to string for logging
+    const char* weekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    ESP_LOGI(TAG, "� Setting meter date: 20%02d-%02d-%02d (%s)", 
+             year, month, timeinfo.tm_mday, weekdays[timeinfo.tm_wday]);
+#else
+    // Non-ESP32 platform: use dummy date (Thursday, 2025-10-10)
+    datetime_data = {0x04, 0x10, 0x10, 0x25};  // WW DD MM YY (BCD, not scrambled)
+    ESP_LOGW(TAG, "⚠️ Non-ESP32 platform: using dummy date Thu 2025-10-10");
+#endif
+
+    // Use generic write frame builder with DI=0x04000101 (Date only - 4 bytes)
+    return build_dlt645_write_frame(address, 0x04000101, datetime_data);
+}
+
+/**
+ * @brief Build DL/T 645-2007 time write command frame (Set meter time only)
+ * 
+ * This is a convenience wrapper that uses the generic build_dlt645_write_frame() function.
+ * Automatically retrieves current system time and formats it as BCD data.
+ * 
+ * DL/T 645-2007: DI=0x04000102 uses 3-byte format for TIME ONLY (HH mm SS)
+ * 
+ * @param address Meter address (6 bytes, BCD format, LSB first)
+ * @return Complete DL/T 645-2007 write time command frame ready for UART transmission
+ * 
+ * @note Automatically retrieves current system time via time() function
+ * @warning Some meters may require password authorization for write operations
+ * @warning Broadcast address is NOT allowed for write operations
+ */
+std::vector<uint8_t> DLT645Component::build_dlt645_write_time_frame(const std::vector<uint8_t>& address)
+{
+    // Prepare time data in BCD format (3 bytes: HH mm SS)
+    // DL/T 645-2007: DI=0x04000102 uses 3-byte format for TIME ONLY
+    std::vector<uint8_t> time_data;
+
+#if defined(USE_ESP32) || defined(USE_ESP_IDF)
+    // Get current system time
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    // Convert to BCD format (NOT scrambled yet - will be scrambled in build_dlt645_write_frame)
+    
+    // Byte 0: Hour (HH)
+    uint8_t hour_bcd = ((timeinfo.tm_hour / 10) << 4) | (timeinfo.tm_hour % 10);
+    time_data.push_back(hour_bcd);
+
+    // Byte 1: Minute (mm)
+    uint8_t min_bcd = ((timeinfo.tm_min / 10) << 4) | (timeinfo.tm_min % 10);
+    time_data.push_back(min_bcd);
+
+    // Byte 2: Second (SS)
+    uint8_t sec_bcd = ((timeinfo.tm_sec / 10) << 4) | (timeinfo.tm_sec % 10);
+    time_data.push_back(sec_bcd);
+
+    ESP_LOGI(TAG, "🕐 Setting meter time: %02d:%02d:%02d", 
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+#else
+    // Non-ESP32 platform: use dummy time (12:00:00)
+    time_data = {0x12, 0x00, 0x00};  // HH mm SS (BCD, not scrambled)
+    ESP_LOGW(TAG, "⚠️ Non-ESP32 platform: using dummy time 12:00:00");
+#endif
+
+    // Use generic write frame builder with DI=0x04000102 (Time only - 3 bytes)
+    return build_dlt645_write_frame(address, 0x04000102, time_data);
+}
+
+/**
+ * @brief Build DL/T 645-2007 broadcast time synchronization frame (Control Code 0x08)
+ * 
+ * Constructs a broadcast time synchronization frame according to DL/T 645-2007 protocol.
+ * This command uses Control Code 0x08 for one-shot time sync (year, month, day, hour, minute).
+ * 
+ * Frame format: [Preamble] [Start] [Address] [Start] [Control=0x08] [Length=05] [Data] [Checksum] [End]
+ * 
+ * Control Code: 0x08 (Broadcast time synchronization)
+ * Data Field Structure (5 bytes before scrambling, little-endian BCD):
+ *   - Byte 0: Year (YY) - Last 2 digits, e.g., 2025 → 0x25
+ *   - Byte 1: Month (MM) - 01-12, e.g., October → 0x10
+ *   - Byte 2: Day (DD) - 01-31, e.g., 10th → 0x10
+ *   - Byte 3: Hour (HH) - 00-23
+ *   - Byte 4: Minute (mm) - 00-59
+ * 
+ * Data Scrambling: All data bytes are scrambled by adding 0x33 before transmission
+ * 
+ * @param address Broadcast address (typically 0x99 repeated 6 times for broadcast)
+ * @return Complete DL/T 645-2007 broadcast time sync frame ready for UART transmission
+ * 
+ * @note This command is typically sent to broadcast address (99 99 99 99 99 99)
+ * @note Format follows GitHub implementation: https://github.com/600888/dlt645
+ * @warning Some meters may reject broadcast time sync if not authorized
+ */
+std::vector<uint8_t> DLT645Component::build_dlt645_broadcast_time_sync_frame(const std::vector<uint8_t>& address)
+{
+    std::vector<uint8_t> frame;
+
+#if defined(USE_ESP32) || defined(USE_ESP_IDF)
+    // Get current system time
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    // 1. Preamble (0xFE) - Wake up receiver (optional but recommended for broadcast)
+    frame.insert(frame.end(), {0xFE, 0xFE, 0xFE, 0xFE});
+
+    // 2. Start delimiter (0x68)
+    frame.push_back(0x68);
+
+    // 3. Address field (6 bytes) - typically broadcast address
+    for (size_t i = 0; i < 6 && i < address.size(); i++) {
+        frame.push_back(address[i]);
+    }
+
+    // 4. Second start delimiter (0x68)
+    frame.push_back(0x68);
+
+    // 5. Control code: 0x08 (Broadcast time synchronization)
+    frame.push_back(0x08);
+
+    // 6. Data length: 5 bytes
+    frame.push_back(0x05);
+
+    // 7. Data field (5 bytes, scrambled with +0x33)
+    // Byte 0: Year (last 2 digits) - BCD format
+    int year = timeinfo.tm_year + 1900;  // tm_year is years since 1900
+    uint8_t year_bcd = ((year % 100) / 10 << 4) | ((year % 100) % 10);
+    frame.push_back(year_bcd + 0x33);  // Scramble
+
+    // Byte 1: Month (01-12) - BCD format
+    int month = timeinfo.tm_mon + 1;  // tm_mon is 0-11
+    uint8_t month_bcd = ((month / 10) << 4) | (month % 10);
+    frame.push_back(month_bcd + 0x33);  // Scramble
+
+    // Byte 2: Day (01-31) - BCD format
+    uint8_t day_bcd = ((timeinfo.tm_mday / 10) << 4) | (timeinfo.tm_mday % 10);
+    frame.push_back(day_bcd + 0x33);  // Scramble
+
+    // Byte 3: Hour (00-23) - BCD format
+    uint8_t hour_bcd = ((timeinfo.tm_hour / 10) << 4) | (timeinfo.tm_hour % 10);
+    frame.push_back(hour_bcd + 0x33);  // Scramble
+
+    // Byte 4: Minute (00-59) - BCD format
+    uint8_t min_bcd = ((timeinfo.tm_min / 10) << 4) | (timeinfo.tm_min % 10);
+    frame.push_back(min_bcd + 0x33);  // Scramble
+
+    // 8. Calculate checksum (modulo 256 sum from first 0x68 to last data byte)
+    uint8_t checksum = 0;
+    for (size_t i = 4; i < frame.size(); i++) {  // Skip preamble
+        checksum += frame[i];
+    }
+    frame.push_back(checksum);
+
+    // 9. End delimiter (0x16)
+    frame.push_back(0x16);
+
+    ESP_LOGI(TAG, "📡 Broadcast time sync: %04d-%02d-%02d %02d:%02d", 
+             year, month, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min);
+    ESP_LOGI(TAG, "   Frame size: %d bytes, Control Code: 0x08", frame.size());
+
+#else
+    // Non-ESP32 platform: return empty frame
+    ESP_LOGE(TAG, "⚠️ Broadcast time sync not supported on non-ESP32 platforms");
+#endif
+
+    return frame;
+}
+
+/**
+ * @brief Build DL/T 645-2007 relay control command frame (Trip/Close relay command)
+ * 
+ * Constructs a relay control command frame according to DL/T 645-2007 protocol.
+ * Frame format: [Preamble] [Start] [Address] [Start] [Control] [Length] [Data] [Checksum] [End]
+ * 
+ * Control Code: 0x1C (Remote control command)
+ * Data Field Structure (16 bytes before scrambling):
+ *   - PA (1 byte): Password authority level (default: 0x02)
+ *   - P0-P2 (3 bytes): Password (default: 0x00 0x00 0x00)
+ *   - C0-C3 (4 bytes): Operator code (default: 0x00 0x00 0x00 0x00)
+ *   - N1 (1 byte): Command type (0x1A=trip/open, 0x1C=close)
+ *   - N2 (1 byte): Command parameter (default: 0x00)
+ *   - N3-N8 (6 bytes): Timestamp (BCD format: SS MM HH DD MM YY)
+ * 
+ * @param address Meter address (6 bytes, BCD format, LSB first)
+ * @param close_relay true=close relay, false=trip/open relay
+ * @return Complete DL/T 645-2007 relay control command frame ready for UART transmission
+ * 
+ * @note This command requires proper password authorization (default level 0x02)
+ * @warning Timestamp must be current or future time, past time will be rejected by meter
+ */
+std::vector<uint8_t> DLT645Component::build_dlt645_relay_control_frame(const std::vector<uint8_t>& address,
+                                                                       bool close_relay)
+{
+    std::vector<uint8_t> frame;
+
+    // 1. Preamble (0xFE) - Wake up receiver
+    frame.insert(frame.end(), {0xFE, 0xFE, 0xFE, 0xFE});
+
+    // 2. Start delimiter (0x68)
+    frame.push_back(0x68);
+
+    // 3. Address field (6 bytes)
+    for (size_t i = 0; i < 6 && i < address.size(); i++) {
+        frame.push_back(address[i]);
+    }
+
+    // 4. Second start delimiter (0x68)
+    frame.push_back(0x68);
+
+    // 5. Control code: 0x1C (Remote control command)
+    // 0x1C = 0001 1100
+    // Bit7-6: 00 = Master station
+    // Bit5: 0 = Normal response
+    // Bit4: 1 = Has subsequent frame
+    // Bit3-0: 1100 = Control command
+    frame.push_back(0x1C);
+
+    // 6. Data length: 16 bytes (0x10)
+    frame.push_back(0x10);
+
+    // 7. Data field (16 bytes, will be scrambled with +0x33)
+    // PA: Password authority level (0x02)
+    frame.push_back(0x02 + 0x33);  // = 0x35
+
+    // P0-P2: Password (BCD format: 123456)
+    // 123456 in BCD = 0x12 0x34 0x56
+    frame.push_back(0x56 + 0x33);  // P0: Low 2 digits (56) = 0x89
+    frame.push_back(0x34 + 0x33);  // P1: Middle 2 digits (34) = 0x67
+    frame.push_back(0x12 + 0x33);  // P2: High 2 digits (12) = 0x45
+
+    // C0-C3: Operator code (default: 00000000)
+    for (int i = 0; i < 4; i++) {
+        frame.push_back(0x00 + 0x33);  // = 0x33
+    }
+
+    // N1: Command type
+    if (close_relay) {
+        frame.push_back(0x1C + 0x33);  // Close relay = 0x1C + 0x33 = 0x4F
+        ESP_LOGI(TAG, "🔌 Building CLOSE relay command");
+    } else {
+        frame.push_back(0x1A + 0x33);  // Trip/Open relay = 0x1A + 0x33 = 0x4D
+        ESP_LOGI(TAG, "⚡ Building TRIP/OPEN relay command");
+    }
+
+    // N2: Command parameter (reserved, default: 0x00)
+    frame.push_back(0x00 + 0x33);  // = 0x33
+
+    // N3-N8: Timestamp (BCD format: SS MM HH DD MM YY)
+    // Get current time
+#if defined(USE_ESP32) || defined(USE_ESP_IDF)
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    // Convert to BCD and add scrambling
+    // N3: Second (SS)
+    uint8_t sec_bcd = ((timeinfo.tm_sec / 10) << 4) | (timeinfo.tm_sec % 10);
+    frame.push_back(sec_bcd + 0x33);
+
+    // N4: Minute (MM)
+    uint8_t min_bcd = ((timeinfo.tm_min / 10) << 4) | (timeinfo.tm_min % 10);
+    frame.push_back(min_bcd + 0x33);
+
+    // N5: Hour (HH)
+    uint8_t hour_bcd = ((timeinfo.tm_hour / 10) << 4) | (timeinfo.tm_hour % 10);
+    frame.push_back(hour_bcd + 0x33);
+
+    // N6: Day (DD)
+    uint8_t day_bcd = ((timeinfo.tm_mday / 10) << 4) | (timeinfo.tm_mday % 10);
+    frame.push_back(day_bcd + 0x33);
+
+    // N7: Month (MM)
+    int month = timeinfo.tm_mon + 1;  // tm_mon is 0-11
+    uint8_t mon_bcd = ((month / 10) << 4) | (month % 10);
+    frame.push_back(mon_bcd + 0x33);
+
+    // N8: Year (YY) - last 2 digits
+    int year = (timeinfo.tm_year + 1900) % 100;
+    uint8_t year_bcd = ((year / 10) << 4) | (year % 10);
+    frame.push_back(year_bcd + 0x33);
+
+    ESP_LOGI(TAG, "📅 Timestamp: 20%02d-%02d-%02d %02d:%02d:%02d", year, month, timeinfo.tm_mday, 
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+#else
+    // Non-ESP32 platform: use dummy timestamp
+    for (int i = 0; i < 6; i++) {
+        frame.push_back(0x00 + 0x33);
+    }
+#endif
+
+    // 8. Checksum CS (1 byte)
+    // Calculate from first 0x68 (skip 4 preamble bytes)
+    uint8_t checksum = 0;
+    for (size_t i = 4; i < frame.size(); i++) {  // Start from first 0x68
+        checksum += frame[i];
+    }
+    frame.push_back(checksum);
+
+    // 9. End delimiter (0x16)
+    frame.push_back(0x16);
+
+    // Debug log
+    ESP_LOGD(TAG, "🔧 Build DL/T 645 relay control frame: Address=%02X%02X%02X%02X%02X%02X, Command=%s",
+             address[0], address[1], address[2], address[3], address[4], address[5],
+             close_relay ? "CLOSE" : "TRIP/OPEN");
+
+    return frame;
+}
+
+// Data field scrambling/unscrambling functions
 void DLT645Component::scramble_dlt645_data(std::vector<uint8_t>& data)
 {
     for (size_t i = 0; i < data.size(); i++) {
@@ -877,7 +1353,7 @@ void DLT645Component::unscramble_dlt645_data(std::vector<uint8_t>& data)
     }
 }
 
-// BCD
+// BCD to float conversion
 float DLT645Component::bcd_to_float(const std::vector<uint8_t>& bcd_data, int decimal_places)
 {
     uint32_t int_value = 0;
@@ -887,9 +1363,9 @@ float DLT645Component::bcd_to_float(const std::vector<uint8_t>& bcd_data, int de
         uint8_t low_nibble = bcd_data[i] & 0x0F;
         uint8_t high_nibble = (bcd_data[i] >> 4) & 0x0F;
 
-        // BCD
+        // Invalid BCD check
         if (low_nibble > 9 || high_nibble > 9) {
-            ESP_LOGW(TAG, "⚠️ BCD: 0x%02X", bcd_data[i]);
+            ESP_LOGW(TAG, "⚠️ Invalid BCD digit: 0x%02X", bcd_data[i]);
             return 0.0f;
         }
 
@@ -902,38 +1378,39 @@ float DLT645Component::bcd_to_float(const std::vector<uint8_t>& bcd_data, int de
     return (float)int_value / pow(10, decimal_places);
 }
 
-// DL/T 645-2007 BCD
+// DL/T 645-2007 BCD to float with sign bit support
 float DLT645Component::bcd_to_float_with_sign(const std::vector<uint8_t>& bcd_data, int decimal_places)
 {
     if (bcd_data.empty()) {
-        ESP_LOGW(TAG, "⚠️ BCD");
+        ESP_LOGW(TAG, "⚠️ Empty BCD data");
         return 0.0f;
     }
 
-    //  ()
+    // Check sign bit (highest bit of last byte)
     bool is_negative = (bcd_data.back() & 0x80) != 0;
 
     std::vector<uint8_t> clean_bcd_data = bcd_data;
-    clean_bcd_data.back() &= 0x7F; //
+    clean_bcd_data.back() &= 0x7F; // Clear sign bit
 
-    ESP_LOGD(TAG, "📊 BCD: =0x%02X, =0x%02X, =%s", bcd_data.back(), clean_bcd_data.back(), is_negative ? "" : "");
+    ESP_LOGD(TAG, "📊 BCD sign parsing: original=0x%02X, clean=0x%02X, negative=%s", 
+             bcd_data.back(), clean_bcd_data.back(), is_negative ? "yes" : "no");
 
-    // BCD
+    // Convert BCD to float
     float result = bcd_to_float(clean_bcd_data, decimal_places);
 
     return is_negative ? -result : result;
 }
 
-// ============= DL/T 645-2007  =============
+// ============= DL/T 645-2007 Protocol Functions =============
 
 bool DLT645Component::discover_meter_address()
 {
     if (!this->uart_initialized_) {
-        ESP_LOGE(TAG, "❌ UART，");
+        ESP_LOGE(TAG, "❌ UART not initialized, cannot discover address");
         return false;
     }
 
-    ESP_LOGD(TAG, "🔍 DL/T 645...");
+    ESP_LOGD(TAG, "🔍 Discovering DL/T 645 meter address...");
 
     // Broadcast address 99 99 99 99 99 99
     std::vector<uint8_t> broadcast_address = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};
@@ -1005,7 +1482,231 @@ bool DLT645Component::query_active_power_total()
     return success;
 }
 
-// DL/T 645
+bool DLT645Component::relay_trip_action()
+{
+    if (!this->uart_initialized_) {
+        ESP_LOGE(TAG, "❌ UART not initialized, cannot execute relay trip operation");
+        return false;
+    }
+
+    if (this->meter_address_bytes_.empty() ||
+        (this->meter_address_bytes_.size() == 6 && this->meter_address_bytes_[0] == 0x99)) {
+        ESP_LOGE(TAG, "❌ Meter address not discovered, cannot execute relay trip operation");
+        return false;
+    }
+
+    ESP_LOGW(TAG, "⚡ Executing relay TRIP/OPEN operation...");
+
+    // Use current meter address
+    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
+
+    ESP_LOGI(TAG, "📡 Sending TRIP command to meter address: %02X %02X %02X %02X %02X %02X",
+             meter_address[0], meter_address[1], meter_address[2],
+             meter_address[3], meter_address[4], meter_address[5]);
+
+    // Build trip command frame (false = trip/open)
+    std::vector<uint8_t> trip_frame = build_dlt645_relay_control_frame(meter_address, false);
+
+    // Send command and wait for response
+    bool success = send_dlt645_frame(trip_frame, this->frame_timeout_ms_);
+
+    if (success) {
+        ESP_LOGW(TAG, "✅ TRIP command sent, waiting for meter response...");
+    } else {
+        ESP_LOGE(TAG, "❌ TRIP command send failed");
+    }
+
+    return success;
+}
+
+bool DLT645Component::relay_close_action()
+{
+    if (!this->uart_initialized_) {
+        ESP_LOGE(TAG, "❌ UART not initialized, cannot execute relay close operation");
+        return false;
+    }
+
+    if (this->meter_address_bytes_.empty() ||
+        (this->meter_address_bytes_.size() == 6 && this->meter_address_bytes_[0] == 0x99)) {
+        ESP_LOGE(TAG, "❌ Meter address not discovered, cannot execute relay close operation");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "🔌 Executing relay CLOSE operation...");
+
+    // Use current meter address
+    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
+
+    ESP_LOGI(TAG, "📡 Sending CLOSE command to meter address: %02X %02X %02X %02X %02X %02X",
+             meter_address[0], meter_address[1], meter_address[2],
+             meter_address[3], meter_address[4], meter_address[5]);
+
+    // Build close command frame (true = close)
+    std::vector<uint8_t> close_frame = build_dlt645_relay_control_frame(meter_address, true);
+
+    // Send command and wait for response
+    bool success = send_dlt645_frame(close_frame, this->frame_timeout_ms_);
+
+    if (success) {
+        ESP_LOGI(TAG, "✅ CLOSE command sent, waiting for meter response...");
+    } else {
+        ESP_LOGE(TAG, "❌ CLOSE command send failed");
+    }
+
+    return success;
+}
+
+bool DLT645Component::set_datetime_action()
+{
+    if (!this->uart_initialized_) {
+        ESP_LOGE(TAG, "❌ UART not initialized, cannot set meter datetime");
+        return false;
+    }
+
+    if (this->meter_address_bytes_.empty() ||
+        (this->meter_address_bytes_.size() == 6 && 
+         (this->meter_address_bytes_[0] == 0x99 || this->meter_address_bytes_[0] == 0xAA))) {
+        ESP_LOGE(TAG, "❌ Meter address not discovered or is broadcast address, cannot set datetime");
+        ESP_LOGE(TAG, "   Write operations require specific meter address (broadcast not allowed)");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "🕐 Setting meter date and time from system time...");
+
+    // Use current meter address
+    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
+
+    ESP_LOGI(TAG, "📡 Sending SET DATETIME command to meter address: %02X %02X %02X %02X %02X %02X",
+             meter_address[0], meter_address[1], meter_address[2],
+             meter_address[3], meter_address[4], meter_address[5]);
+
+    // Build write datetime command frame
+    std::vector<uint8_t> datetime_frame = build_dlt645_write_datetime_frame(meter_address);
+
+    // Send command and wait for response
+    // Use standard frame timeout (1 second)
+    bool success = send_dlt645_frame(datetime_frame, this->frame_timeout_ms_);
+
+    if (success) {
+        ESP_LOGI(TAG, "✅ SET DATETIME command sent, waiting for meter response...");
+        ESP_LOGI(TAG, "   Expected response: Control code 0x94 (write data success)");
+    } else {
+        ESP_LOGE(TAG, "❌ SET DATETIME command send failed");
+    }
+
+    return success;
+}
+
+bool DLT645Component::set_time_action()
+{
+    if (!this->uart_initialized_) {
+        ESP_LOGE(TAG, "❌ UART not initialized, cannot set meter time");
+        return false;
+    }
+
+    if (this->meter_address_bytes_.empty() ||
+        (this->meter_address_bytes_.size() == 6 && 
+         (this->meter_address_bytes_[0] == 0x99 || this->meter_address_bytes_[0] == 0xAA))) {
+        ESP_LOGE(TAG, "❌ Meter address not discovered or is broadcast address, cannot set time");
+        ESP_LOGE(TAG, "   Write operations require specific meter address (broadcast not allowed)");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "🕐 Setting meter time from system time...");
+
+    // Use current meter address
+    std::vector<uint8_t> meter_address = this->meter_address_bytes_;
+
+    ESP_LOGI(TAG, "📡 Sending SET TIME command to meter address: %02X %02X %02X %02X %02X %02X",
+             meter_address[0], meter_address[1], meter_address[2],
+             meter_address[3], meter_address[4], meter_address[5]);
+
+    // Build write time command frame (3 bytes: HH mm SS)
+    std::vector<uint8_t> time_frame = build_dlt645_write_time_frame(meter_address);
+
+    // Send command and wait for response
+    // Use standard frame timeout (1 second)
+    bool success = send_dlt645_frame(time_frame, this->frame_timeout_ms_);
+
+    if (success) {
+        ESP_LOGI(TAG, "✅ SET TIME command sent (3-byte format: HH mm SS)");
+        ESP_LOGI(TAG, "   Expected response: Control code 0x94 (write data success)");
+    } else {
+        ESP_LOGE(TAG, "❌ SET TIME command send failed");
+    }
+
+    return success;
+}
+
+/**
+ * @brief Execute broadcast time synchronization (Control Code 0x08)
+ * 
+ * Sends a broadcast time synchronization command to all meters on the bus.
+ * This is a one-shot command that sets year, month, day, hour, and minute.
+ * 
+ * Unlike DI-based write commands (set_datetime/set_time), broadcast time sync:
+ * - Uses Control Code 0x08 (instead of 0x14 with data identifier)
+ * - Targets broadcast address (99 99 99 99 99 99)
+ * - Uses 5-byte format: YY MM DD HH mm (no seconds, no weekday)
+ * - Does not require password authorization
+ * - All meters on the bus receive and process the command simultaneously
+ * 
+ * Data Format (5 bytes, BCD, little-endian):
+ * - Byte 0: Year (last 2 digits) - e.g., 2025 → 0x25
+ * - Byte 1: Month (01-12)
+ * - Byte 2: Day (01-31)
+ * - Byte 3: Hour (00-23)
+ * - Byte 4: Minute (00-59)
+ * 
+ * Reference: DL/T 645-2007 standard, GitHub implementation (600888/dlt645)
+ * 
+ * @return true if command sent successfully, false otherwise
+ * 
+ * @note This function automatically uses broadcast address (99 99 99 99 99 99)
+ * @note Meter response expected: Control code 0x88 (broadcast time sync acknowledgment)
+ * @warning Some meters may not respond to broadcast commands (fire-and-forget)
+ */
+bool DLT645Component::broadcast_time_sync()
+{
+    if (!this->uart_initialized_) {
+        ESP_LOGE(TAG, "❌ UART not initialized, cannot broadcast time sync");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "📡 Broadcasting time synchronization to all meters...");
+    ESP_LOGI(TAG, "   Using Control Code 0x08 (Broadcast Time Sync)");
+    ESP_LOGI(TAG, "   Format: 5 bytes (YY MM DD HH mm) - No seconds, no weekday");
+
+    // Use broadcast address (99 99 99 99 99 99)
+    std::vector<uint8_t> broadcast_addr = {0x99, 0x99, 0x99, 0x99, 0x99, 0x99};
+
+    ESP_LOGI(TAG, "📡 Broadcast address: %02X %02X %02X %02X %02X %02X",
+             broadcast_addr[0], broadcast_addr[1], broadcast_addr[2],
+             broadcast_addr[3], broadcast_addr[4], broadcast_addr[5]);
+
+    // Build broadcast time sync frame
+    std::vector<uint8_t> sync_frame = build_dlt645_broadcast_time_sync_frame(broadcast_addr);
+
+    if (sync_frame.empty()) {
+        ESP_LOGE(TAG, "❌ Failed to build broadcast time sync frame");
+        return false;
+    }
+
+    // Send broadcast command
+    // Note: Broadcast commands may not receive response from all meters
+    bool success = send_dlt645_frame(sync_frame, this->frame_timeout_ms_);
+
+    if (success) {
+        ESP_LOGI(TAG, "✅ BROADCAST TIME SYNC command sent successfully");
+        ESP_LOGI(TAG, "   Expected response: Control code 0x88 (or no response for fire-and-forget)");
+    } else {
+        ESP_LOGE(TAG, "❌ BROADCAST TIME SYNC command send failed");
+    }
+
+    return success;
+}
+
+// 解析DL/T 645数据标识符对应的数据
 void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field)
 {
     ESP_LOGD(TAG, "🔍 DL/T 645 - DI: 0x%08X, : %d", data_identifier, data_field.size());

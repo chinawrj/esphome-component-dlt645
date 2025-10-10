@@ -75,7 +75,14 @@ TimeHmsTrigger = dlt645_component_ns.class_(
     "TimeHmsTrigger", automation.Trigger.template(cg.uint32, cg.uint32, cg.uint32, cg.uint32)
 )
 
-# 
+# DL/T 645-2007 Relay Control and DateTime Setting Actions
+RelayTripAction = dlt645_component_ns.class_("RelayTripAction", automation.Action)
+RelayCloseAction = dlt645_component_ns.class_("RelayCloseAction", automation.Action)
+SetDatetimeAction = dlt645_component_ns.class_("SetDatetimeAction", automation.Action)
+SetTimeAction = dlt645_component_ns.class_("SetTimeAction", automation.Action)
+BroadcastTimeSyncAction = dlt645_component_ns.class_("BroadcastTimeSyncAction", automation.Action)
+
+# Component configuration
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(DLT645Component),
@@ -237,3 +244,79 @@ async def to_code(config):
     for conf in config.get(CONF_ON_TIME_HMS, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.uint32, "hour"), (cg.uint32, "minute"), (cg.uint32, "second")], conf)
+
+
+# DL/T 645-2007 继电器控制 Actions
+@automation.register_action(
+    "dlt645_component.relay_trip",
+    RelayTripAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(DLT645Component),
+        }
+    ),
+)
+async def relay_trip_action_to_code(config, action_id, template_arg, args):
+    """拉闸动作 (Trip/Open relay) - 断开电表继电器"""
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+
+@automation.register_action(
+    "dlt645_component.relay_close",
+    RelayCloseAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(DLT645Component),
+        }
+    ),
+)
+async def relay_close_action_to_code(config, action_id, template_arg, args):
+    """合闸动作 (Close relay) - 闭合电表继电器"""
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+
+@automation.register_action(
+    "dlt645_component.set_datetime",
+    SetDatetimeAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(DLT645Component),
+        }
+    ),
+)
+async def set_datetime_action_to_code(config, action_id, template_arg, args):
+    """Set meter date - Automatically gets and sets meter date from system time (WW DD MM YY - 4 bytes)"""
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+
+@automation.register_action(
+    "dlt645_component.set_time",
+    SetTimeAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(DLT645Component),
+        }
+    ),
+)
+async def set_time_action_to_code(config, action_id, template_arg, args):
+    """Set meter time - Automatically gets and sets meter time from system time (HH mm SS - 3 bytes)"""
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
+
+
+@automation.register_action(
+    "dlt645_component.broadcast_time_sync",
+    BroadcastTimeSyncAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(DLT645Component),
+        }
+    ),
+)
+async def broadcast_time_sync_action_to_code(config, action_id, template_arg, args):
+    """Broadcast time synchronization - Uses control code 0x08 to sync time to all meters (YY MM DD HH mm - 5 bytes)"""
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)

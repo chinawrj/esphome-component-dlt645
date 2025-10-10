@@ -140,6 +140,17 @@ public:
         this->time_hms_callback_.add(std::move(callback));
     }
 
+    // DL/T 645-2007 Relay control public methods
+    bool relay_trip_action();  // Trip relay (open/disconnect)
+    bool relay_close_action(); // Close relay (connect)
+    
+    // DL/T 645-2007 Date/Time setting public methods (DI-based write commands)
+    bool set_datetime_action(); // Set meter date (WW DD MM YY format - 4 bytes, DI=0x04000101)
+    bool set_time_action();     // Set meter time (HH mm SS format - 3 bytes, DI=0x04000102)
+    
+    // DL/T 645-2007 Broadcast time synchronization (Control Code 0x08)
+    bool broadcast_time_sync(); // Broadcast time sync (YY MM DD HH mm format - 5 bytes, C=0x08)
+
 protected:
     void trigger_hello_world_event();
 
@@ -164,18 +175,28 @@ protected:
 
     // DL/T 645-2007 frame building and data processing helper functions
     std::vector<uint8_t> build_dlt645_read_frame(const std::vector<uint8_t>& address, uint32_t data_identifier);
+    std::vector<uint8_t> build_dlt645_write_frame(const std::vector<uint8_t>& address, uint32_t data_identifier, 
+                                                   const std::vector<uint8_t>& write_data);  // Generic write frame builder
     void scramble_dlt645_data(std::vector<uint8_t>& data);                                  // Data scrambling (+0x33)
     void unscramble_dlt645_data(std::vector<uint8_t>& data);                                // Data descrambling (-0x33)
     float bcd_to_float(const std::vector<uint8_t>& bcd_data, int decimal_places);           // BCD to float
     float bcd_to_float_with_sign(const std::vector<uint8_t>& bcd_data, int decimal_places); // BCD to float（）
 
-    // DL/T 645-2007
-    bool discover_meter_address();                                                                          //
-    bool query_active_power_total();                                                                        //
-    void parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field); // DI
+    // DL/T 645-2007 basic query functions
+    bool discover_meter_address();                                                                          // Discover meter address
+    bool query_active_power_total();                                                                        // Query total power
+    void parse_dlt645_data_by_identifier(uint32_t data_identifier, const std::vector<uint8_t>& data_field); // Parse data by DI
 
-    //
-    size_t get_next_event_index(size_t current_index, size_t max_events); //
+    // DL/T 645-2007 relay control frame building (protected helper)
+    std::vector<uint8_t> build_dlt645_relay_control_frame(const std::vector<uint8_t>& address, bool close_relay);
+    
+    // DL/T 645-2007 date/time write helpers
+    std::vector<uint8_t> build_dlt645_write_datetime_frame(const std::vector<uint8_t>& address); // Date: WW DD MM YY (4 bytes, DI=0x04000101)
+    std::vector<uint8_t> build_dlt645_write_time_frame(const std::vector<uint8_t>& address);     // Time: HH mm SS (3 bytes, DI=0x04000102)
+    std::vector<uint8_t> build_dlt645_broadcast_time_sync_frame(const std::vector<uint8_t>& address); // Broadcast: YY MM DD HH mm (5 bytes, C=0x08)
+
+    // Event polling index management
+    size_t get_next_event_index(size_t current_index, size_t max_events); // 获取下一个事件索引
 #endif
 
     uint32_t magic_number_{42};
@@ -402,6 +423,79 @@ public:
                 this->trigger(data_identifier, hour, minute, second);
             });
     }
+};
+
+// DL/T 645-2007 继电器控制 Actions
+template<typename... Ts> class RelayTripAction : public Action<Ts...>
+{
+public:
+    RelayTripAction(DLT645Component* parent) : parent_(parent) {}
+
+    void play(Ts... x) override
+    {
+        this->parent_->relay_trip_action();
+    }
+
+protected:
+    DLT645Component* parent_;
+};
+
+template<typename... Ts> class RelayCloseAction : public Action<Ts...>
+{
+public:
+    RelayCloseAction(DLT645Component* parent) : parent_(parent) {}
+
+    void play(Ts... x) override
+    {
+        this->parent_->relay_close_action();
+    }
+
+protected:
+    DLT645Component* parent_;
+};
+
+// DL/T 645-2007 Date/Time Setting Actions
+template<typename... Ts> class SetDatetimeAction : public Action<Ts...>
+{
+public:
+    SetDatetimeAction(DLT645Component* parent) : parent_(parent) {}
+
+    void play(Ts... x) override
+    {
+        this->parent_->set_datetime_action();
+    }
+
+protected:
+    DLT645Component* parent_;
+};
+
+template<typename... Ts> class SetTimeAction : public Action<Ts...>
+{
+public:
+    SetTimeAction(DLT645Component* parent) : parent_(parent) {}
+
+    void play(Ts... x) override
+    {
+        this->parent_->set_time_action();
+    }
+
+protected:
+    DLT645Component* parent_;
+};
+
+// DL/T 645-2007 Broadcast Time Synchronization Action (Control Code 0x08)
+template<typename... Ts> class BroadcastTimeSyncAction : public Action<Ts...>
+{
+public:
+    BroadcastTimeSyncAction(DLT645Component* parent) : parent_(parent) {}
+
+    void play(Ts... x) override
+    {
+        this->parent_->broadcast_time_sync();
+    }
+
+protected:
+    DLT645Component* parent_;
 };
 
 } // namespace dlt645_component
