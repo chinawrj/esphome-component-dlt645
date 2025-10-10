@@ -214,7 +214,9 @@ void DLT645Component::dlt645_task_func(void* parameter)
     };
 
     const size_t num_dlt645_events = sizeof(dlt645_event_bits) / sizeof(dlt645_event_bits[0]);
-    size_t current_event_index = 0;
+    
+    // 初始化组件的事件管理参数
+    component->set_max_events(num_dlt645_events);
 
     ESP_LOGI(TAG, "📋 DL/T 645 event loop configured with %d data identifiers", num_dlt645_events);
 
@@ -224,11 +226,11 @@ void DLT645Component::dlt645_task_func(void* parameter)
     //  - DL/T 645 +
     while (component->task_running_) {
         // === 2. DL/T 645 （1s）===
-        current_event_index = component->get_next_event_index(current_event_index, num_dlt645_events);
-        uint32_t data_identifier = dlt645_data_identifiers[current_event_index];
-        const char* event_name = dlt645_event_names[current_event_index];
+        component->get_next_event_index();
+        uint32_t data_identifier = dlt645_data_identifiers[component->current_event_index_];
+        const char* event_name = dlt645_event_names[component->current_event_index_];
 
-        ESP_LOGD(TAG, "📡 [%d/%d] DL/T 645: %s (DI: 0x%08X)", current_event_index + 1, num_dlt645_events, event_name,
+        ESP_LOGD(TAG, "📡 [%d/%d] DL/T 645: %s (DI: 0x%08X)", component->current_event_index_ + 1, num_dlt645_events, event_name,
                  data_identifier);
 
         // data_identifier，
@@ -262,9 +264,6 @@ void DLT645Component::dlt645_task_func(void* parameter)
         }
         // ready data immediately after sending
         component->process_uart_data();
-
-        //  - CPU
-        vTaskDelay(pdMS_TO_TICKS(5)); // 10ms，
     }
 
     component->dlt645_task_handle_ = nullptr;
@@ -1992,51 +1991,39 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
 
 // =============  =============
 
-size_t DLT645Component::get_next_event_index(size_t current_index, size_t max_events)
+void DLT645Component::get_next_event_index()
 {
     if (false == this->device_address_discovered_) {
-        // ，0
-        return 0;
+        this->current_event_index_ = 0;
+        return;
     }
-    // （）
-    size_t next_index = (current_index + 1) % max_events;
+    size_t next_index = (this->current_event_index_ + 1) % this->max_events_;
 
-    // ，（index 0）
     if (next_index == 0 && this->device_address_discovered_) {
         ESP_LOGD(TAG, "⏭️ ，");
         next_index = 1; // （）
     }
 
-    // === ： vs  = N:1 ===
     if (this->device_address_discovered_) {
-        // 1:  (index=1)
-        if (current_index == 1) {
+        if (this->current_event_index_ == 1) {
             this->total_power_query_count_++;
-
-            // N，
             if (this->total_power_query_count_ < this->power_ratio_) {
                 ESP_LOGD(TAG, "🔋  (%d/%d)", this->total_power_query_count_, this->power_ratio_);
                 next_index = 1; //
             } else {
-                // N，
                 ESP_LOGD(TAG, "🔄 Total power query ratio (%d)，", this->power_ratio_);
 
                 this->total_power_query_count_ = 0;
-
                 next_index = this->last_non_power_query_index_;
 
-                // （）
                 this->last_non_power_query_index_ = (this->last_non_power_query_index_ + 1);
-
-                // index 0,1，index 2（）
-                if (this->last_non_power_query_index_ >= max_events || this->last_non_power_query_index_ <= 1) {
+                if (this->last_non_power_query_index_ >= this->max_events_ || this->last_non_power_query_index_ <= 1) {
                     this->last_non_power_query_index_ = 2;
                 }
             }
         }
-        // 2:  ()，
-        else if (current_index >= 2) {
-            ESP_LOGD(TAG, "🔄  (index=%d)，", current_index);
+        else if (this->current_event_index_ >= 2) {
+            ESP_LOGD(TAG, "🔄  (index=%d)，", this->current_event_index_);
             next_index = 1; //
         }
     }
@@ -2054,7 +2041,7 @@ size_t DLT645Component::get_next_event_index(size_t current_index, size_t max_ev
                  this->last_non_power_query_index_);
     }
 
-    return next_index;
+    this->current_event_index_ = next_index;
 }
 
 #endif // defined(USE_ESP32) || defined(USE_ESP_IDF)

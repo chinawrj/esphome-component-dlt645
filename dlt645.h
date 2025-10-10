@@ -88,6 +88,12 @@ public:
         this->power_ratio_ = ratio;
     }
 
+    // Set max events count for event polling (called during task initialization)
+    void set_max_events(size_t max_events)
+    {
+        this->max_events_ = max_events;
+    }
+
     // Original generic callback function (for backward compatibility)
     void add_on_hello_world_callback(std::function<void(uint32_t)>&& callback)
     {
@@ -196,7 +202,11 @@ protected:
     std::vector<uint8_t> build_dlt645_broadcast_time_sync_frame(const std::vector<uint8_t>& address); // Broadcast: YY MM DD HH mm (5 bytes, C=0x08)
 
     // Event polling index management
-    size_t get_next_event_index(size_t current_index, size_t max_events); // 获取下一个事件索引
+    void get_next_event_index(); // 获取下一个事件索引（内部管理 current_event_index_）
+    
+    // Event polling state (accessed by task function only)
+    size_t current_event_index_{0};  // 当前事件索引（由 get_next_event_index 内部管理）
+    size_t max_events_{0};           // 最大事件数量（在任务初始化时设置）
 #endif
 
     uint32_t magic_number_{42};
@@ -264,7 +274,6 @@ protected:
     // （）
     std::vector<int> baud_rate_list_{9600, 4800, 2400, 1200}; // ，
     size_t current_baud_rate_index_{0};                       //
-
 
     //
     uint32_t command_send_start_time_{0};
