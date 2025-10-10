@@ -787,9 +787,17 @@ void DLT645Component::check_and_parse_dlt645_frame() {
       }
     }
     if (address_changed) {
+      // Log the address change with old and new values
+      if (this->meter_address_bytes_.size() == 6) {
+        ESP_LOGW(TAG, "📍 电表地址已更新 (Meter address changed): 旧地址 %02X %02X %02X %02X %02X %02X -> 新地址 %02X %02X %02X %02X %02X %02X", 
+             this->meter_address_bytes_[0], this->meter_address_bytes_[1], this->meter_address_bytes_[2], 
+             this->meter_address_bytes_[3], this->meter_address_bytes_[4], this->meter_address_bytes_[5],
+             address[0], address[1], address[2], address[3], address[4], address[5]);
+      } else {
+        ESP_LOGW(TAG, "📍 电表地址已发现 (Meter address discovered): %02X %02X %02X %02X %02X %02X", 
+             address[0], address[1], address[2], address[3], address[4], address[5]);
+      }
       this->meter_address_bytes_ = address;
-      ESP_LOGW(TAG, "📍 : %02X %02X %02X %02X %02X %02X", 
-           address[0], address[1], address[2], address[3], address[4], address[5]);
       this->device_address_discovered_ = true;
     }
   }
@@ -1052,22 +1060,35 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
         
         ESP_LOGD(TAG, "⚡ [] %.1f W (%.4f kW)", power_w, power_kw);
         
-        // >=0<0（）
-        if (this->power_direction_initialized_) {
-          // （last_active_power_w_ >= 0  power_w < 0）
-          if (this->last_active_power_w_ >= 0.0f && power_w < 0.0f) {
-            ESP_LOGW(TAG, "⚠️  >=0<0: %.1f W -> %.1f W", 
-                     this->last_active_power_w_, power_w);
-            // 
+        // Detect reverse power (<0) and trigger warning
+        // Priority 1: Trigger warning immediately when reverse power is detected
+        // Priority 2: Avoid duplicate warnings (do not trigger again when power remains negative)
+        if (power_w < 0.0f) {
+          // Current power is negative (reverse power / feeding back to grid)
+          if (!this->power_direction_initialized_) {
+            // First reading is reverse power, trigger warning immediately
+            ESP_LOGW(TAG, "⚠️ Reverse power detected on first reading: %.1f W", power_w);
             this->warning_reverse_power_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL), power_w);
+            this->power_direction_initialized_ = true;
+          } else if (this->last_active_power_w_ >= 0.0f) {
+            // Power transitioned from positive/zero (>=0) to negative (<0), trigger warning
+            ESP_LOGW(TAG, "⚠️ Power direction reversed from >=0 to <0: %.1f W -> %.1f W", 
+                     this->last_active_power_w_, power_w);
+            this->warning_reverse_power_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL), power_w);
+          } else {
+            // Power remains negative, do not trigger warning (avoid duplicates)
+            ESP_LOGD(TAG, "🔄 Power remains negative: %.1f W (warning not triggered)", power_w);
           }
         } else {
-          // 
-          this->power_direction_initialized_ = true;
-          ESP_LOGD(TAG, "🔧 : %.1f W", power_w);
+          // Current power is positive or zero
+          if (!this->power_direction_initialized_) {
+            // First reading, initialize state
+            this->power_direction_initialized_ = true;
+            ESP_LOGD(TAG, "🔧 Power direction state initialized: %.1f W", power_w);
+          }
         }
         
-        // 
+        // Save current power value for next comparison
         this->last_active_power_w_ = power_w;
         
         // （）
