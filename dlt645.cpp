@@ -1052,6 +1052,24 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
         
         ESP_LOGD(TAG, "⚡ [] %.1f W (%.4f kW)", power_w, power_kw);
         
+        // >=0<0（）
+        if (this->power_direction_initialized_) {
+          // （last_active_power_w_ >= 0  power_w < 0）
+          if (this->last_active_power_w_ >= 0.0f && power_w < 0.0f) {
+            ESP_LOGW(TAG, "⚠️  >=0<0: %.1f W -> %.1f W", 
+                     this->last_active_power_w_, power_w);
+            // 
+            this->warning_reverse_power_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL), power_w);
+          }
+        } else {
+          // 
+          this->power_direction_initialized_ = true;
+          ESP_LOGD(TAG, "🔧 : %.1f W", power_w);
+        }
+        
+        // 
+        this->last_active_power_w_ = power_w;
+        
         // （）
         this->cached_active_power_w_ = power_w;
         xEventGroupSetBits(this->event_group_, EVENT_DI_ACTIVE_POWER_TOTAL);

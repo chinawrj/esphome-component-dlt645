@@ -93,6 +93,9 @@ class DLT645Component : public Component {
   void add_on_active_power_callback(std::function<void(uint32_t, float)> &&callback) {
     this->active_power_callback_.add(std::move(callback));
   }
+  void add_on_warning_reverse_power_callback(std::function<void(uint32_t, float)> &&callback) {
+    this->warning_reverse_power_callback_.add(std::move(callback));
+  }
   void add_on_energy_active_callback(std::function<void(uint32_t, float)> &&callback) {
     this->energy_active_callback_.add(std::move(callback));
   }
@@ -168,6 +171,7 @@ class DLT645Component : public Component {
   // DL/T 645-2007 
   CallbackManager<void(uint32_t)> device_address_callback_;    // 
   CallbackManager<void(uint32_t, float)> active_power_callback_;      // 
+  CallbackManager<void(uint32_t, float)> warning_reverse_power_callback_;  // （>=0<0）
   CallbackManager<void(uint32_t, float)> energy_active_callback_;     // 
   CallbackManager<void(uint32_t, float)> voltage_a_callback_;         // A
   CallbackManager<void(uint32_t, float)> current_a_callback_;         // A
@@ -235,6 +239,10 @@ class DLT645Component : public Component {
   std::string cached_time_hms_str_{""};          // 
   
   // 
+  float last_active_power_w_{0.0f};              // W，>=0<0
+  bool power_direction_initialized_{false};      // 
+  
+  // 
   uint32_t cached_year_{0};                      // 
   uint32_t cached_month_{0};                     // 
   uint32_t cached_day_{0};                       // 
@@ -271,6 +279,15 @@ class ActivePowerTrigger : public Trigger<uint32_t, float> {
   explicit ActivePowerTrigger(DLT645Component *parent) {
     parent->add_on_active_power_callback([this](uint32_t data_identifier, float power_watts) {
       this->trigger(data_identifier, power_watts);  // power_watts W
+    });
+  }
+};
+
+class WarningReversePowerTrigger : public Trigger<uint32_t, float> {
+ public:
+  explicit WarningReversePowerTrigger(DLT645Component *parent) {
+    parent->add_on_warning_reverse_power_callback([this](uint32_t data_identifier, float power_watts) {
+      this->trigger(data_identifier, power_watts);  // >=0<0
     });
   }
 };

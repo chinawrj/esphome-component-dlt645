@@ -19,6 +19,7 @@ CONF_ON_HELLO_WORLD = "on_hello_world"
 # DL/T 645-2007 
 CONF_ON_DEVICE_ADDRESS = "on_device_address"
 CONF_ON_ACTIVE_POWER = "on_active_power"
+CONF_ON_WARNING_REVERSE_POWER = "on_warning_reverse_power"
 CONF_ON_ENERGY_ACTIVE = "on_energy_active"
 CONF_ON_VOLTAGE_A = "on_voltage_a"
 CONF_ON_CURRENT_A = "on_current_a"
@@ -45,6 +46,9 @@ DeviceAddressTrigger = dlt645_component_ns.class_(
 )
 ActivePowerTrigger = dlt645_component_ns.class_(
     "ActivePowerTrigger", automation.Trigger.template(cg.uint32, cg.float_)
+)
+WarningReversePowerTrigger = dlt645_component_ns.class_(
+    "WarningReversePowerTrigger", automation.Trigger.template(cg.uint32, cg.float_)
 )
 EnergyActiveTrigger = dlt645_component_ns.class_(
     "EnergyActiveTrigger", automation.Trigger.template(cg.uint32, cg.float_)
@@ -94,6 +98,11 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ON_ACTIVE_POWER): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ActivePowerTrigger),
+            }
+        ),
+        cv.Optional(CONF_ON_WARNING_REVERSE_POWER): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WarningReversePowerTrigger),
             }
         ),
         cv.Optional(CONF_ON_ENERGY_ACTIVE): automation.validate_automation(
@@ -181,6 +190,11 @@ async def to_code(config):
     
     #  (DI: 0x02030000) - ：data_identifier + power_watts (: W)
     for conf in config.get(CONF_ON_ACTIVE_POWER, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_watts")], conf)
+    
+    #  (DI: 0x02030000) - >=0<0
+    for conf in config.get(CONF_ON_WARNING_REVERSE_POWER, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.float_, "power_watts")], conf)
     
