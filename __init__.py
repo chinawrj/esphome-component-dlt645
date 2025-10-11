@@ -3,6 +3,65 @@ ESPHome DLT645 Component
 An ESPHome component for DL/T 645-2007 smart meter communication protocol,
 supporting UART communication and real-time monitoring of various electrical parameters.
 """
+
+# TODO: GPIO CONFIGURATION SUPPORT - Python Schema and Code Generation
+# 
+# Current Status: GPIO pins are HARDCODED in C++ header (dlt645.h)
+# TX=GPIO1, RX=GPIO2 are compile-time constants (static constexpr)
+# 
+# Implementation Steps for YAML GPIO Configuration:
+# 
+# 1. Import Required ESPHome Modules:
+#    from esphome.const import CONF_TX_PIN, CONF_RX_PIN
+#    from esphome import pins
+# 
+# 2. Define Configuration Constants (add after existing CONF_ definitions):
+#    CONF_BAUD_RATE = "baud_rate"
+#    CONF_RX_BUFFER_SIZE = "rx_buffer_size"
+# 
+# 3. Update CONFIG_SCHEMA (add these optional fields):
+#    CONFIG_SCHEMA = cv.Schema(
+#        {
+#            cv.GenerateID(): cv.declare_id(DLT645Component),
+#            cv.Optional(CONF_TX_PIN, default=1): pins.internal_gpio_output_pin_number,
+#            cv.Optional(CONF_RX_PIN, default=2): pins.internal_gpio_input_pin_number,
+#            cv.Optional(CONF_BAUD_RATE, default=2400): cv.int_range(min=1200, max=9600),
+#            cv.Optional(CONF_RX_BUFFER_SIZE, default=256): cv.int_range(min=128, max=1024),
+#            # ... existing configuration fields ...
+#        }
+#    ).extend(cv.COMPONENT_SCHEMA)
+# 
+# 4. Update to_code() Function (add after set_power_ratio):
+#    # Configure UART GPIO pins
+#    cg.add(var.set_tx_pin(config[CONF_TX_PIN]))
+#    cg.add(var.set_rx_pin(config[CONF_RX_PIN]))
+#    cg.add(var.set_baud_rate(config[CONF_BAUD_RATE]))
+#    cg.add(var.set_rx_buffer_size(config[CONF_RX_BUFFER_SIZE]))
+# 
+# 5. User YAML Configuration Example:
+#    dlt645_component:
+#      id: my_meter
+#      tx_pin: GPIO17     # TX pin for ESP32-C3
+#      rx_pin: GPIO18     # RX pin for ESP32-C3
+#      baud_rate: 2400    # Optional: defaults to 2400
+#      rx_buffer_size: 512 # Optional: defaults to 256
+#      power_ratio: 10
+#      on_active_power:
+#        - lambda: |-
+#            ESP_LOGI("main", "Power: %.1f W", power_watts);
+# 
+# Benefits:
+#   ✅ Support different ESP32 variants (ESP32, ESP32-C3, ESP32-S3, ESP32-C6)
+#   ✅ No recompilation needed for different GPIO configurations
+#   ✅ ESPHome validates GPIO capabilities (input/output) automatically
+#   ✅ User-friendly YAML configuration
+#   ✅ Consistent with other ESPHome components (uart, spi, i2c)
+# 
+# Reference ESPHome Components for GPIO Configuration Patterns:
+#   - components/uart/__init__.py (UART pin configuration)
+#   - components/spi/__init__.py (SPI pin configuration)
+#   - components/i2c/__init__.py (I2C pin configuration)
+
 from esphome import automation
 import esphome.codegen as cg
 import esphome.config_validation as cv

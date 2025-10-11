@@ -280,6 +280,75 @@ protected:
 
     // === DL/T 645-2007 UART ===
 
+    // TODO: HARDCODED GPIO CONFIGURATION - Need YAML Configuration Support
+    // 
+    // Current Status: GPIO pins are HARDCODED as compile-time constants (TX=GPIO1, RX=GPIO2)
+    // This limits flexibility for different ESP32 boards/hardware configurations.
+    // 
+    // Required Changes to Add YAML Configuration Support:
+    // 
+    // 1. Add Member Variables (replace static constexpr):
+    //    int dlt645_tx_pin_{1};      // Default GPIO1, configurable via YAML
+    //    int dlt645_rx_pin_{2};      // Default GPIO2, configurable via YAML
+    //    int dlt645_baud_rate_{2400}; // Default 2400, configurable via YAML
+    //    int dlt645_rx_buffer_size_{256}; // Default 256, configurable via YAML
+    // 
+    // 2. Add Setter Methods in Class Declaration:
+    //    void set_tx_pin(int pin) { this->dlt645_tx_pin_ = pin; }
+    //    void set_rx_pin(int pin) { this->dlt645_rx_pin_ = pin; }
+    //    void set_baud_rate(int rate) { this->dlt645_baud_rate_ = rate; }
+    //    void set_rx_buffer_size(int size) { this->dlt645_rx_buffer_size_ = size; }
+    // 
+    // 3. Update __init__.py Python Configuration Schema:
+    //    Add to CONFIG_SCHEMA:
+    //      cv.Optional(CONF_TX_PIN, default=1): pins.internal_gpio_output_pin_number,
+    //      cv.Optional(CONF_RX_PIN, default=2): pins.internal_gpio_input_pin_number,
+    //      cv.Optional("baud_rate", default=2400): cv.int_range(min=1200, max=9600),
+    //      cv.Optional("rx_buffer_size", default=256): cv.int_range(min=128, max=1024),
+    // 
+    //    Add to async_to_code():
+    //      cg.add(var.set_tx_pin(config[CONF_TX_PIN]))
+    //      cg.add(var.set_rx_pin(config[CONF_RX_PIN]))
+    //      cg.add(var.set_baud_rate(config["baud_rate"]))
+    //      cg.add(var.set_rx_buffer_size(config["rx_buffer_size"]))
+    // 
+    // 4. Update C++ Code Usage (in dlt645.cpp):
+    //    Replace all instances of:
+    //      DLT645_TX_PIN → this->dlt645_tx_pin_
+    //      DLT645_RX_PIN → this->dlt645_rx_pin_
+    //      DLT645_BAUD_RATE → this->dlt645_baud_rate_
+    //      DLT645_RX_BUFFER_SIZE → this->dlt645_rx_buffer_size_
+    // 
+    //    Example in init_dlt645_uart():
+    //      uart_set_pin(this->uart_port_, this->dlt645_tx_pin_, this->dlt645_rx_pin_, ...)
+    // 
+    // 5. YAML Configuration Example (user side):
+    //    dlt645_component:
+    //      id: my_meter
+    //      tx_pin: GPIO1      # Configurable TX pin
+    //      rx_pin: GPIO2      # Configurable RX pin
+    //      baud_rate: 2400    # Optional: defaults to 2400
+    //      rx_buffer_size: 256 # Optional: defaults to 256
+    // 
+    // 6. Validation Considerations:
+    //    - Ensure TX pin is output-capable GPIO
+    //    - Ensure RX pin is input-capable GPIO
+    //    - Validate baud rate is in supported range (1200, 2400, 4800, 9600)
+    //    - Validate rx_buffer_size is reasonable (128-1024 bytes)
+    //    - Check for GPIO conflicts with other components
+    // 
+    // Benefits of YAML Configuration:
+    //   ✅ Support different ESP32 boards (ESP32, ESP32-C3, ESP32-S3, etc.)
+    //   ✅ No recompilation needed for different hardware
+    //   ✅ Easy integration with ESPHome's pin validation system
+    //   ✅ User-friendly configuration via YAML
+    //   ✅ Follows ESPHome best practices (see uart component reference)
+    // 
+    // Reference ESPHome Components:
+    //   - esphome/components/uart/ (UART pin configuration pattern)
+    //   - esphome/components/spi/ (SPI pin configuration pattern)
+    //   - esphome/components/i2c/ (I2C pin configuration pattern)
+
     // UART（YAML）
     static constexpr int DLT645_TX_PIN = 1;           // GPIO1 -
     static constexpr int DLT645_RX_PIN = 2;           // GPIO2 -
