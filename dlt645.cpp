@@ -81,6 +81,7 @@ void DLT645Component::setup()
     this->last_data_receive_time_ = 0;
     this->last_sent_data_identifier_ = 0;
 
+    this->set_baud_rate(this->dlt645_baud_rate_);
     this->current_baud_rate_index_ = 0; // （9600）
 
     this->command_send_start_time_ = 0;
@@ -147,6 +148,10 @@ void DLT645Component::dump_config()
     ESP_LOGCONFIG(TAG, "  Task Stack Size: %lu ", (unsigned long)DLT645_TASK_STACK_SIZE);
     ESP_LOGCONFIG(TAG, "  Task Priority: %d", (int)DLT645_TASK_PRIORITY);
     ESP_LOGCONFIG(TAG, "  Event Group: ");
+    ESP_LOGCONFIG(TAG, "  UART TX Pin: GPIO%d", this->dlt645_tx_pin_);
+    ESP_LOGCONFIG(TAG, "  UART RX Pin: GPIO%d", this->dlt645_rx_pin_);
+    ESP_LOGCONFIG(TAG, "  UART Baud Rate: %d", this->dlt645_baud_rate_);
+    ESP_LOGCONFIG(TAG, "  UART RX Buffer Size: %d", this->dlt645_rx_buffer_size_);
     ESP_LOGCONFIG(TAG, "  DL/T 645 :");
     ESP_LOGCONFIG(TAG, "    - : %lu ms", (unsigned long)this->frame_timeout_ms_);
     ESP_LOGCONFIG(TAG, "    - : %lu ms", (unsigned long)this->device_discovery_timeout_ms_);
@@ -524,26 +529,27 @@ bool DLT645Component::init_dlt645_uart()
     }
 
     // UART
-    ret = uart_set_pin(this->uart_port_, DLT645_TX_PIN, DLT645_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ret = uart_set_pin(this->uart_port_, this->dlt645_tx_pin_, this->dlt645_rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "❌ UART: %s", esp_err_to_name(ret));
         return false;
     }
 
-    ESP_LOGI(TAG, "📌 UART: TX=GPIO%d, RX=GPIO%d", DLT645_TX_PIN, DLT645_RX_PIN);
+    ESP_LOGI(TAG, "📌 UART: TX=GPIO%d, RX=GPIO%d", this->dlt645_tx_pin_, this->dlt645_rx_pin_);
 
     // UART
-    ret = uart_driver_install(this->uart_port_, DLT645_RX_BUFFER_SIZE, 0, 0, nullptr, 0);
+    ret = uart_driver_install(this->uart_port_, this->dlt645_rx_buffer_size_, 0, 0, nullptr, 0);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "❌ UART: %s", esp_err_to_name(ret));
         return false;
     }
 
     this->uart_initialized_ = true;
+    this->dlt645_baud_rate_ = current_baud_rate;
 
     ESP_LOGI(TAG, "✅ DL/T 645 UART");
     ESP_LOGI(TAG, "   - UART: %d", this->uart_port_);
-    ESP_LOGI(TAG, "   - : %d ", DLT645_RX_BUFFER_SIZE);
+    ESP_LOGI(TAG, "   - : %d ", this->dlt645_rx_buffer_size_);
 
     return true;
 }
@@ -594,20 +600,21 @@ bool DLT645Component::change_uart_baud_rate(int new_baud_rate)
     }
 
     // UART
-    ret = uart_set_pin(this->uart_port_, DLT645_TX_PIN, DLT645_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ret = uart_set_pin(this->uart_port_, this->dlt645_tx_pin_, this->dlt645_rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "❌ UART: %s", esp_err_to_name(ret));
         return false;
     }
 
     // UART
-    ret = uart_driver_install(this->uart_port_, DLT645_RX_BUFFER_SIZE, 0, 0, nullptr, 0);
+    ret = uart_driver_install(this->uart_port_, this->dlt645_rx_buffer_size_, 0, 0, nullptr, 0);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "❌ UART: %s", esp_err_to_name(ret));
         return false;
     }
 
     this->uart_initialized_ = true;
+    this->dlt645_baud_rate_ = new_baud_rate;
 
     ESP_LOGW(TAG, "✅ DL/T 645 UART: %d", new_baud_rate);
     return true;
