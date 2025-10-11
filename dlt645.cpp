@@ -1425,8 +1425,8 @@ std::vector<uint8_t> DLT645Component::build_dlt645_relay_control_frame(const std
     uint8_t mon_bcd = ((month / 10) << 4) | (month % 10);
     frame.push_back(mon_bcd + 0x33);
 
-    // N8: Year (YY) - last 2 digits
-    int year = (timeinfo.tm_year + 1900) % 100;
+    // N8: Year (YY) - last 2 digits. Always cut off/on for 2 years
+    int year = (timeinfo.tm_year + 1900 + 2) % 100;
     uint8_t year_bcd = ((year / 10) << 4) | (year % 10);
     frame.push_back(year_bcd + 0x33);
 
@@ -2029,9 +2029,10 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
                 // BCDlambda
                 auto bcd_to_byte = [](uint8_t bcd) -> int { return ((bcd >> 4) & 0x0F) * 10 + (bcd & 0x0F); };
 
-                int hour = bcd_to_byte(actual_data[0]);
-                int minute = bcd_to_byte(actual_data[1]);
-                int second = bcd_to_byte(actual_data[2]);
+                // DL/T 645-2007: 时分秒格式是 SS MM HH (秒-分-时)
+                int second = bcd_to_byte(actual_data[0]);  // 第1字节：秒
+                int minute = bcd_to_byte(actual_data[1]);  // 第2字节：分
+                int hour = bcd_to_byte(actual_data[2]);    // 第3字节：时
 
                 char time_hms_str[16];
                 snprintf(time_hms_str, sizeof(time_hms_str), "%02d%02d%02d", hour, minute, second);
