@@ -63,7 +63,6 @@ uint32_t get_current_time_ms()
 void DLT645Component::setup()
 {
     ESP_LOGCONFIG(TAG, "🚀 Setting up DLT645 component with FreeRTOS task...");
-    ESP_LOGCONFIG(TAG, "Magic Number: %lu", (unsigned long)this->magic_number_);
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
     // === Initialize DL/T 645-2007 UART communication variables ===
@@ -127,21 +126,12 @@ void DLT645Component::loop()
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
     // ESP32，FreeRTOS，loop
     this->process_dlt645_events();
-#else
-    // ESP32
-    static uint32_t last_trigger_time = 0;
-    uint32_t now = get_current_time_ms();
-    if (now - last_trigger_time >= DLT645_TRIGGER_INTERVAL_MS) {
-        this->trigger_hello_world_event();
-        last_trigger_time = now;
-    }
 #endif
 }
 
 void DLT645Component::dump_config()
 {
-    ESP_LOGCONFIG(TAG, "Hello World Component (FreeRTOS Task):");
-    ESP_LOGCONFIG(TAG, "  Magic Number: %lu", (unsigned long)this->magic_number_);
+    ESP_LOGCONFIG(TAG, "DLT645 Component (DL/T 645-2007 Protocol):");
     ESP_LOGCONFIG(TAG, "  Trigger Interval: %lu ", (unsigned long)(DLT645_TRIGGER_INTERVAL_MS / 1000));
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
     ESP_LOGCONFIG(TAG, "  Task Status: %s", this->task_running_ ? "" : "");
@@ -156,12 +146,6 @@ void DLT645Component::dump_config()
     ESP_LOGCONFIG(TAG, "    - : %lu ms", (unsigned long)this->frame_timeout_ms_);
     ESP_LOGCONFIG(TAG, "    - : %lu ms", (unsigned long)this->device_discovery_timeout_ms_);
 #endif
-}
-
-void DLT645Component::trigger_hello_world_event()
-{
-    ESP_LOGD(TAG, "🌍 Hello World ! Magic Number: %lu", (unsigned long)this->magic_number_);
-    this->hello_world_callback_.call(this->magic_number_);
 }
 
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
@@ -397,13 +381,6 @@ void DLT645Component::process_dlt645_events()
                                                  pdFALSE,            //
                                                  0                   // （0）
     );
-
-    // （）
-    if (event_bits & EVENT_GENERAL) {
-        ESP_LOGD(TAG, "📥 EVENT_GENERAL");
-        // ESPHome
-        this->trigger_hello_world_event();
-    }
 
     // DL/T 645-2007
     struct DLT645EventInfo

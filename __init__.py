@@ -16,9 +16,7 @@ from esphome.const import (
 )
 
 # 
-CONF_MAGIC_NUMBER = "magic_number"
 CONF_POWER_RATIO = "power_ratio"
-CONF_ON_HELLO_WORLD = "on_hello_world"
 CONF_BAUD_RATE = "baud_rate"
 CONF_RX_BUFFER_SIZE = "rx_buffer_size"
 
@@ -40,11 +38,6 @@ dlt645_component_ns = cg.esphome_ns.namespace("dlt645_component")
 
 # 
 DLT645Component = dlt645_component_ns.class_("DLT645Component", cg.Component)
-
-# Trigger，
-HelloWorldTrigger = dlt645_component_ns.class_(
-    "HelloWorldTrigger", automation.Trigger.template(cg.uint32)
-)
 
 # DL/T 645-2007 
 DeviceAddressTrigger = dlt645_component_ns.class_(
@@ -92,19 +85,11 @@ BroadcastTimeSyncAction = dlt645_component_ns.class_("BroadcastTimeSyncAction", 
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(DLT645Component),
-        cv.Optional(CONF_MAGIC_NUMBER, default=42): cv.uint32_t,
         cv.Optional(CONF_POWER_RATIO, default=10): cv.int_range(min=1, max=100),
         cv.Optional(CONF_TX_PIN, default=1): pins.internal_gpio_output_pin_number,
         cv.Optional(CONF_RX_PIN, default=2): pins.internal_gpio_input_pin_number,
         cv.Optional(CONF_BAUD_RATE, default=2400): cv.int_range(min=1200, max=9600),
         cv.Optional(CONF_RX_BUFFER_SIZE, default=256): cv.int_range(min=128, max=1024),
-        
-        # （）
-        cv.Optional(CONF_ON_HELLO_WORLD): automation.validate_automation(
-            {
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(HelloWorldTrigger),
-            }
-        ),
         
         # DL/T 645-2007 
         cv.Optional(CONF_ON_DEVICE_ADDRESS): automation.validate_automation(
@@ -187,20 +172,12 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     
-    # magic_number
-    cg.add(var.set_magic_number(config[CONF_MAGIC_NUMBER]))
-    
     # 
     cg.add(var.set_power_ratio(config[CONF_POWER_RATIO]))
     cg.add(var.set_tx_pin(config[CONF_TX_PIN]))
     cg.add(var.set_rx_pin(config[CONF_RX_PIN]))
     cg.add(var.set_baud_rate(config[CONF_BAUD_RATE]))
     cg.add(var.set_rx_buffer_size(config[CONF_RX_BUFFER_SIZE]))
-    
-    # （）
-    for conf in config.get(CONF_ON_HELLO_WORLD, []):
-        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
-        await automation.build_automation(trigger, [(cg.uint32, "magic_number")], conf)
     
     # DL/T 645-2007
     

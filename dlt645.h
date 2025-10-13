@@ -108,11 +108,6 @@ public:
     void loop() override;
     void dump_config() override;
 
-    void set_magic_number(uint32_t magic_number)
-    {
-        this->magic_number_ = magic_number;
-    }
-
     void set_tx_pin(int pin)
     {
         this->dlt645_tx_pin_ = pin;
@@ -150,12 +145,6 @@ public:
     void set_max_events(size_t max_events)
     {
         this->max_events_ = max_events;
-    }
-
-    // Original generic callback function (for backward compatibility)
-    void add_on_hello_world_callback(std::function<void(uint32_t)>&& callback)
-    {
-        this->hello_world_callback_.add(std::move(callback));
     }
 
     // DL/T 645-2007 data identifier independent event callback functions
@@ -216,8 +205,6 @@ public:
     bool broadcast_time_sync(); // Broadcast time sync (YY MM DD HH mm format - 5 bytes, C=0x08)
 
 protected:
-    void trigger_hello_world_event();
-
     // FreeRTOS task related methods
     bool create_dlt645_task();
     void destroy_dlt645_task();
@@ -270,16 +257,10 @@ private:
     enum DLT645_REQUEST_TYPE current_request_type{DLT645_REQUEST_TYPE::READ_DEVICE_ADDRESS};
     
 protected:
-
-    uint32_t magic_number_{42};
-
     // Query ratio control
     int power_ratio_{10};
     int total_power_query_count_{0};
     enum DLT645_REQUEST_TYPE last_non_power_query_index_{DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE};
-
-    // （）
-    CallbackManager<void(uint32_t)> hello_world_callback_;
 
     // DL/T 645-2007 event callbacks
     CallbackManager<void(uint32_t)> device_address_callback_;      // Device address
@@ -334,7 +315,7 @@ protected:
     uint32_t switch_baud_rate_when_failed_{false}; //
 
     // （）
-    std::vector<int> baud_rate_list_{9600, 4800, 2400, 1200}; // ，
+    std::vector<int> baud_rate_list_{2400, 2400, 2400, 2400}; // ，
     size_t current_baud_rate_index_{0};                       //
 
     //
@@ -367,16 +348,6 @@ protected:
     uint32_t cached_hour_{0};   // Hour
     uint32_t cached_minute_{0}; // Minute
     uint32_t cached_second_{0}; // Second
-};
-
-// （）
-class HelloWorldTrigger : public Trigger<uint32_t>
-{
-public:
-    explicit HelloWorldTrigger(DLT645Component* parent)
-    {
-        parent->add_on_hello_world_callback([this](uint32_t magic_number) { this->trigger(magic_number); });
-    }
 };
 
 // DL/T 645-2007

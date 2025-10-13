@@ -36,11 +36,9 @@ The component uses:
 
 ## Configuration Options
 
-| Option | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |--------|------|---------|-------------|
-| `magic_number` | `uint32` | `42` | Magic number passed in hello_world event |
 | `power_ratio` | `int` | `10` | Query ratio control for total power vs other parameters |
-| `on_hello_world` | `Automation` | - | General event automation trigger |
 | `on_device_address` | `Automation` | - | Device address discovery event trigger |
 | `on_active_power` | `Automation` | - | Active power data event trigger |
 | `on_energy_active` | `Automation` | - | Active energy data event trigger |
@@ -81,7 +79,6 @@ uart:
   stop_bits: 1
 
 dlt645_component:
-  magic_number: 123
   power_ratio: 10
   on_active_power:
     then:
