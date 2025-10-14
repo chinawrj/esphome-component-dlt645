@@ -315,7 +315,7 @@ protected:
     uint32_t switch_baud_rate_when_failed_{false}; //
 
     // （）
-    std::vector<int> baud_rate_list_{2400, 2400, 2400, 2400}; // ，
+    std::vector<int> baud_rate_list_{1200, 2400, 4800, 9600}; // ，
     size_t current_baud_rate_index_{0};                       //
 
     //

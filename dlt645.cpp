@@ -604,7 +604,7 @@ void DLT645Component::cycle_to_next_baud_rate()
     this->current_baud_rate_index_ = (this->current_baud_rate_index_ + 1) % this->baud_rate_list_.size();
     int next_baud_rate = this->baud_rate_list_[this->current_baud_rate_index_];
 
-    ESP_LOGW(TAG, " %d : %d (: %d/%d)", current_baud_rate, next_baud_rate, this->current_baud_rate_index_,
+    ESP_LOGW(TAG, "Rate %d -> %d (Index: %d -> %d)", current_baud_rate, next_baud_rate, this->current_baud_rate_index_,
              this->baud_rate_list_.size());
 
     if (!this->change_uart_baud_rate(next_baud_rate)) {
