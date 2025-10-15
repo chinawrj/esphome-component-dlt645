@@ -236,6 +236,13 @@ void DLT645Component::dlt645_task_func(void* parameter)
 
     //  - DL/T 645 +
     while (component->task_running_) {
+        // === Simulation Mode: Skip UART communication ===
+        if (component->simulate_) {
+            component->simulate_measurements_();
+            vTaskDelay(pdMS_TO_TICKS(DLT645_TRIGGER_INTERVAL_MS));  // 5 second interval
+            continue;  // Skip all UART-based logic
+        }
+        
         // === 2. DL/T 645 （1s）===
         enum DLT645_REQUEST_TYPE next_request_type = component->get_next_event_index();
         size_t request_index = sizeof(dlt645_request_infos) / sizeof(dlt645_request_infos[0]);
@@ -2034,6 +2041,94 @@ void DLT645Component::parse_dlt645_data_by_identifier(uint32_t data_identifier, 
             break;
         }
     }
+}
+
+void DLT645Component::simulate_measurements_()
+{
+    ESP_LOGD(TAG, "🎲 Simulating DLT645 meter measurements...");
+    
+    // Get current time for seed variation (use smaller numbers to avoid overflow)
+    uint32_t time_sec = get_current_time_ms() / 1000;  // Convert to seconds for slower variation
+    
+    // Generate reasonable AC voltage (220V ± 10V)
+    float base_voltage = 220.0f;
+    int32_t voltage_offset = (int32_t)(time_sec % 200) - 100;  // -100 to +100
+    float voltage_variation = (float)voltage_offset * 0.1f;    // ±10V variation
+    float simulated_voltage = base_voltage + voltage_variation;
+    
+    // Generate reasonable AC current (-5A to +5A, allowing negative for reverse power flow)
+    float base_current = 0.0f;  // Center around 0A
+    int32_t current_offset = (int32_t)((time_sec + 50) % 100) - 50;  // -50 to +50
+    float current_variation = (float)current_offset * 0.1f;           // ±5A variation
+    float simulated_current = base_current + current_variation;
+    
+    // Generate reasonable AC frequency (49.8Hz to 50.2Hz)
+    float base_frequency = 50.0f;
+    int32_t frequency_offset = (int32_t)((time_sec + 25) % 40) - 20;  // -20 to +20
+    float frequency_variation = (float)frequency_offset * 0.01f;      // ±0.2Hz variation
+    float simulated_frequency = base_frequency + frequency_variation;
+    
+    // Calculate power from voltage and current (with some power factor simulation)
+    int32_t pf_offset = (int32_t)((time_sec + 75) % 30) - 15;        // -15 to +15
+    float power_factor = 0.85f + (float)pf_offset * 0.01f;           // 0.7 to 1.0 power factor
+    if (power_factor < 0.7f) power_factor = 0.7f;
+    if (power_factor > 1.0f) power_factor = 1.0f;
+    
+    // Power = Voltage × Current × Power_Factor (can be negative for reverse power flow)
+    float simulated_power = simulated_voltage * simulated_current * power_factor;
+    
+    // Simulate total energy (incrementing counter based on power)
+    static float accumulated_energy_kwh = 0.0f;
+    if (simulated_power > 0.0f) {
+        // Accumulate energy: power (W) × time (5s) / 3600 / 1000 = kWh
+        accumulated_energy_kwh += (simulated_power * 5.0f) / (3600.0f * 1000.0f);
+    }
+    float simulated_energy = accumulated_energy_kwh;
+    
+    // Simulate reverse energy (only when power is negative)
+    static float accumulated_reverse_energy_kwh = 0.0f;
+    if (simulated_power < 0.0f) {
+        accumulated_reverse_energy_kwh += (fabsf(simulated_power) * 5.0f) / (3600.0f * 1000.0f);
+    }
+    float simulated_reverse_energy = accumulated_reverse_energy_kwh;
+    
+    // Trigger all measurement callbacks with simulated data
+    uint32_t di_voltage = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::VOLTAGE_A_PHASE);
+    uint32_t di_current = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::CURRENT_A_PHASE);
+    uint32_t di_frequency = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::FREQUENCY);
+    uint32_t di_power = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ACTIVE_POWER_TOTAL);
+    uint32_t di_energy = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_ACTIVE_TOTAL);
+    uint32_t di_reverse_energy = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::ENERGY_REVERSE_TOTAL);
+    uint32_t di_pf = static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::POWER_FACTOR_TOTAL);
+    
+    // Call the callbacks (these will trigger event handlers in YAML)
+    this->voltage_a_callback_.call(di_voltage, simulated_voltage);
+    this->current_a_callback_.call(di_current, simulated_current);
+    this->frequency_callback_.call(di_frequency, simulated_frequency);
+    this->power_factor_callback_.call(di_pf, power_factor);
+    this->energy_active_callback_.call(di_energy, simulated_energy);
+    this->energy_reverse_callback_.call(di_reverse_energy, simulated_reverse_energy);
+    
+    // Handle power callback with reverse power detection
+    if (!this->power_direction_initialized_) {
+        this->last_active_power_w_ = simulated_power;
+        this->power_direction_initialized_ = true;
+    }
+    
+    // Detect reverse power transition (>=0 to <0)
+    bool reverse_power_detected = (this->last_active_power_w_ >= 0.0f && simulated_power < 0.0f);
+    if (reverse_power_detected) {
+        ESP_LOGW(TAG, "⚠️ [SIMULATION] Reverse power transition detected: %.1f W → %.1f W", 
+                 this->last_active_power_w_, simulated_power);
+        this->warning_reverse_power_callback_.call(di_power, simulated_power);
+    }
+    this->last_active_power_w_ = simulated_power;
+    
+    // Always call normal power callback
+    this->active_power_callback_.call(di_power, simulated_power);
+    
+    ESP_LOGD(TAG, "🎲 [SIMULATION] V=%.1fV, I=%.3fA, F=%.2fHz, P=%.1fW, PF=%.3f", 
+             simulated_voltage, simulated_current, simulated_frequency, simulated_power, power_factor);
 }
 
 enum DLT645_REQUEST_TYPE DLT645Component::get_next_event_index()

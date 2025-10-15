@@ -19,6 +19,7 @@ from esphome.const import (
 CONF_POWER_RATIO = "power_ratio"
 CONF_BAUD_RATE = "baud_rate"
 CONF_RX_BUFFER_SIZE = "rx_buffer_size"
+CONF_SIMULATE = "simulate"
 
 # DL/T 645-2007 
 CONF_ON_DEVICE_ADDRESS = "on_device_address"
@@ -90,6 +91,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_RX_PIN, default=2): pins.internal_gpio_input_pin_number,
         cv.Optional(CONF_BAUD_RATE, default=2400): cv.int_range(min=1200, max=9600),
         cv.Optional(CONF_RX_BUFFER_SIZE, default=256): cv.int_range(min=128, max=1024),
+        cv.Optional(CONF_SIMULATE, default=False): cv.boolean,
         
         # DL/T 645-2007 
         cv.Optional(CONF_ON_DEVICE_ADDRESS): automation.validate_automation(
@@ -178,6 +180,7 @@ async def to_code(config):
     cg.add(var.set_rx_pin(config[CONF_RX_PIN]))
     cg.add(var.set_baud_rate(config[CONF_BAUD_RATE]))
     cg.add(var.set_rx_buffer_size(config[CONF_RX_BUFFER_SIZE]))
+    cg.add(var.set_simulate(config[CONF_SIMULATE]))
     
     # DL/T 645-2007
     

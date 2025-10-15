@@ -140,6 +140,12 @@ public:
     {
         this->power_ratio_ = ratio;
     }
+    
+    // Set simulation mode
+    void set_simulate(bool simulate)
+    {
+        this->simulate_ = simulate;
+    }
 
     // Set max events count for event polling (called during task initialization)
     void set_max_events(size_t max_events)
@@ -249,6 +255,9 @@ protected:
     // Event polling index management (internal use only)
     enum DLT645_REQUEST_TYPE get_next_event_index();
     
+    // Simulation mode helper
+    void simulate_measurements_();  // Generate simulated meter readings
+    
     // Event polling state (private - cannot be accessed directly from outside)
     size_t max_events_{0};           // Maximum number of events (set during task initialization)
 #endif
@@ -261,6 +270,9 @@ protected:
     int power_ratio_{10};
     int total_power_query_count_{0};
     enum DLT645_REQUEST_TYPE last_non_power_query_index_{DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE};
+    
+    // Simulation mode
+    bool simulate_{false};
 
     // DL/T 645-2007 event callbacks
     CallbackManager<void(uint32_t)> device_address_callback_;      // Device address
