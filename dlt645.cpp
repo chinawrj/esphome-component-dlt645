@@ -2154,11 +2154,12 @@ enum DLT645_REQUEST_TYPE DLT645Component::get_next_event_index()
         ESP_LOGD(TAG, "🔄 Switching to non-power query after %d repeats", this->power_ratio_);
         this->total_power_query_count_ = 0;
         next_request_type = this->last_non_power_query_index_;
-        // Advance non-power query index (cycle range: 2 to max_events_-1)
+        // Advance non-power query index (cycle range: 3 to max_events_-1)
+        // Start from READ_ENERGY_ACTIVE_TOTAL (0x03) to include energy queries
         uint32_t next_index = static_cast<uint32_t>(this->last_non_power_query_index_) + 1;
         if (next_index > static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_POS_END)) {
-            // Wrap around to voltage query (skip device address and power)
-            next_index = static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE);
+            // Wrap around to energy query (skip device address and instant power only)
+            next_index = static_cast<uint32_t>(DLT645_REQUEST_TYPE::READ_ENERGY_ACTIVE_TOTAL);
         }
         this->last_non_power_query_index_ = static_cast<enum DLT645_REQUEST_TYPE>(next_index);
     }

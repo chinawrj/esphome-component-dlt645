@@ -269,7 +269,8 @@ protected:
     // Query ratio control
     int power_ratio_{10};
     int total_power_query_count_{0};
-    enum DLT645_REQUEST_TYPE last_non_power_query_index_{DLT645_REQUEST_TYPE::READ_VOLTAGE_A_PHASE};
+    // Start from ENERGY_ACTIVE_TOTAL to include energy queries in rotation
+    enum DLT645_REQUEST_TYPE last_non_power_query_index_{DLT645_REQUEST_TYPE::READ_ENERGY_ACTIVE_TOTAL};
     
     // Simulation mode
     bool simulate_{false};
