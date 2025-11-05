@@ -33,6 +33,7 @@ CONF_ON_FREQUENCY = "on_frequency"
 CONF_ON_ENERGY_REVERSE = "on_energy_reverse"
 CONF_ON_DATETIME = "on_datetime"
 CONF_ON_TIME_HMS = "on_time_hms"
+CONF_ON_RELAY_STATUS = "on_relay_status"
 
 # 
 dlt645_component_ns = cg.esphome_ns.namespace("dlt645_component")
@@ -73,6 +74,9 @@ DatetimeTrigger = dlt645_component_ns.class_(
 )
 TimeHmsTrigger = dlt645_component_ns.class_(
     "TimeHmsTrigger", automation.Trigger.template(cg.uint32, cg.uint32, cg.uint32, cg.uint32)
+)
+RelayStatusTrigger = dlt645_component_ns.class_(
+    "RelayStatusTrigger", automation.Trigger.template(cg.uint32, cg.uint32)
 )
 
 # DL/T 645-2007 Relay Control and DateTime Setting Actions
@@ -164,6 +168,13 @@ CONFIG_SCHEMA = cv.Schema(
                 cv.Optional("second"): cv.uint32_t,
             }
         ),
+        cv.Optional(CONF_ON_RELAY_STATUS): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(RelayStatusTrigger),
+                cv.Optional("data_identifier"): cv.uint32_t,
+                cv.Optional("status"): cv.uint32_t,
+            }
+        ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -238,6 +249,11 @@ async def to_code(config):
     for conf in config.get(CONF_ON_TIME_HMS, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.uint32, "hour"), (cg.uint32, "minute"), (cg.uint32, "second")], conf)
+    
+    # Relay Status (DI: 0x1C020000)
+    for conf in config.get(CONF_ON_RELAY_STATUS, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [(cg.uint32, "data_identifier"), (cg.uint32, "status")], conf)
 
 
 # DL/T 645-2007 继电器控制 Actions

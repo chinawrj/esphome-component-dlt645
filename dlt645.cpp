@@ -221,7 +221,8 @@ void DLT645Component::dlt645_task_func(void* parameter)
         EVENT_DI_FREQUENCY,            // BIT7:  (0x02800002)
         EVENT_DI_ENERGY_REVERSE_TOTAL, // BIT8:  (0x00020000)
         EVENT_DI_DATETIME,             // BIT9:  (0x04000101)
-        EVENT_DI_TIME_HMS              // BIT10:  (0x04000102)
+        EVENT_DI_TIME_HMS,             // BIT10:  (0x04000102)
+        EVENT_DI_RELAY_STATUS          // BIT11: Relay/switch status (0x04FF0405)
     };
 
     const size_t num_dlt645_events = sizeof(dlt645_event_bits) / sizeof(dlt645_event_bits[0]);
@@ -288,7 +289,7 @@ void DLT645Component::dlt645_task_func(void* parameter)
         case DLT645_REQUEST_TYPE::READ_DATE:
         case DLT645_REQUEST_TYPE::READ_TIME:
         {
-            // Unified code path for all data identifier queries (including ACTIVE_POWER_TOTAL)
+            // Unified code path for all data identifier queries
             component->switch_baud_rate_when_failed_ = false;
             std::vector<uint8_t> query_address = component->meter_address_bytes_;
             if (query_address.empty()) {
@@ -346,6 +347,19 @@ void DLT645Component::dlt645_task_func(void* parameter)
             std::vector<uint8_t> frame = component->build_dlt645_relay_control_frame(meter_address, close_relay);
             if (!frame.empty()) {
                 send_success = component->send_dlt645_frame(frame, component->frame_timeout_ms_);
+                
+                // Immediately update relay status after sending command (local state tracking)
+                if (send_success) {
+                    // Update cached relay status based on command sent
+                    // 0x00 = Closed/Connected, 0x01 = Open/Tripped
+                    component->cached_relay_status_ = close_relay ? 0x00 : 0x01;
+                    
+                    // Trigger relay status event to update UI/sensors immediately
+                    xEventGroupSetBits(component->event_group_, EVENT_DI_RELAY_STATUS);
+                    
+                    ESP_LOGI(TAG, "✅ Relay status locally updated: %s (0x%02X)", 
+                             close_relay ? "CLOSED" : "OPEN", component->cached_relay_status_);
+                }
             }
             break;
         }
@@ -406,7 +420,8 @@ void DLT645Component::process_dlt645_events()
                                              {EVENT_DI_FREQUENCY, 0x02800002, ""},
                                              {EVENT_DI_ENERGY_REVERSE_TOTAL, 0x00020000, ""},
                                              {EVENT_DI_DATETIME, 0x04000101, ""},
-                                             {EVENT_DI_TIME_HMS, 0x04000102, ""}};
+                                             {EVENT_DI_TIME_HMS, 0x04000102, ""},
+                                             {EVENT_DI_RELAY_STATUS, 0x04FF0405, "Relay Status"}};
 
     const size_t num_dlt645_events = sizeof(dlt645_events) / sizeof(dlt645_events[0]);
 
@@ -471,6 +486,23 @@ void DLT645Component::process_dlt645_events()
                              this->cached_second_);
                     this->time_hms_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::TIME_HMS),
                                                   this->cached_hour_, this->cached_minute_, this->cached_second_);
+                    break;
+                case EVENT_DI_RELAY_STATUS:
+                    {
+                        const char* status_str = "Unknown";
+                        if (this->cached_relay_status_ == 0x00) {
+                            status_str = "Closed (Connected)";
+                        } else if (this->cached_relay_status_ == 0x01) {
+                            status_str = "Open (Disconnected)";
+                        } else if (this->cached_relay_status_ == 0x02) {
+                            status_str = "Unknown";
+                        } else if (this->cached_relay_status_ == 0x03) {
+                            status_str = "Fault";
+                        }
+                        ESP_LOGD(TAG, "🔌 Relay Status: 0x%02X (%s)", this->cached_relay_status_, status_str);
+                        this->relay_status_callback_.call(static_cast<uint32_t>(DLT645_DATA_IDENTIFIER::RELAY_STATUS),
+                                                         this->cached_relay_status_);
+                    }
                     break;
                 default:
                     ESP_LOGW(TAG, "⚠️ : 0x%08X", dlt645_events[i].bit);

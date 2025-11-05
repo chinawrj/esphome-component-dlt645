@@ -46,7 +46,8 @@ enum class DLT645_DATA_IDENTIFIER : uint32_t
     FREQUENCY = 0x02800002,            // Grid frequency
     ENERGY_REVERSE_TOTAL = 0x00020000, // Reverse active total energy
     DATETIME = 0x04000101,             // Date and time
-    TIME_HMS = 0x04000102              // Hours, minutes, seconds
+    TIME_HMS = 0x04000102,             // Hours, minutes, seconds
+    RELAY_STATUS = 0x04FF0405          // Relay/switch status (local tracking only, not queried)
 };
 
 // DL/T 645-2007 request type for service code
@@ -90,12 +91,14 @@ const EventBits_t EVENT_DI_FREQUENCY = BIT7;            // BIT7: Frequency
 const EventBits_t EVENT_DI_ENERGY_REVERSE_TOTAL = BIT8; // BIT8: Reverse total energy
 const EventBits_t EVENT_DI_DATETIME = BIT9;             // BIT9: Date and time
 const EventBits_t EVENT_DI_TIME_HMS = BIT10;            // BIT10: Hours, minutes, seconds
+const EventBits_t EVENT_DI_RELAY_STATUS = BIT11;        // BIT11: Relay status
 
-// Mask for all DL/T 645 event bits (BIT1-BIT10)
+// Mask for all DL/T 645 event bits (BIT1-BIT11)
 const EventBits_t ALL_DLT645_EVENTS = EVENT_DI_DEVICE_ADDRESS | EVENT_DI_ACTIVE_POWER_TOTAL |
                                       EVENT_DI_ENERGY_ACTIVE_TOTAL | EVENT_DI_VOLTAGE_A_PHASE |
                                       EVENT_DI_CURRENT_A_PHASE | EVENT_DI_POWER_FACTOR_TOTAL | EVENT_DI_FREQUENCY |
-                                      EVENT_DI_ENERGY_REVERSE_TOTAL | EVENT_DI_DATETIME | EVENT_DI_TIME_HMS;
+                                      EVENT_DI_ENERGY_REVERSE_TOTAL | EVENT_DI_DATETIME | EVENT_DI_TIME_HMS |
+                                      EVENT_DI_RELAY_STATUS;
 
 // Mask for all event bits (including original EVENT_GENERAL)
 const EventBits_t ALL_EVENTS = EVENT_GENERAL | ALL_DLT645_EVENTS;
@@ -198,6 +201,10 @@ public:
     {
         this->time_hms_callback_.add(std::move(callback));
     }
+    void add_on_relay_status_callback(std::function<void(uint32_t, uint32_t)>&& callback)
+    {
+        this->relay_status_callback_.add(std::move(callback));
+    }
 
     // DL/T 645-2007 Relay control public methods
     bool relay_trip_action();  // Trip relay (open/disconnect)
@@ -290,6 +297,8 @@ protected:
         datetime_callback_; // Date and time (DI, year, month, day, weekday)
     CallbackManager<void(uint32_t, uint32_t, uint32_t, uint32_t)>
         time_hms_callback_; // Time HMS (DI, hour, minute, second)
+    CallbackManager<void(uint32_t, uint32_t)>
+        relay_status_callback_; // Relay status (DI, status: 0=closed, 1=open, 2=fault)
 
     // FreeRTOS
 #if defined(USE_ESP32) || defined(USE_ESP_IDF)
@@ -350,6 +359,9 @@ protected:
     // Reverse power detection state tracking
     float last_active_power_w_{0.0f};         // Last power value in W, used to detect >=0 to <0 transition
     bool power_direction_initialized_{false}; // Whether power direction state has been initialized
+
+    // Relay status
+    uint32_t cached_relay_status_{0xFF}; // Relay status: 0=closed, 1=open, 2=fault, 0xFF=unknown
 
     // Date components
     uint32_t cached_year_{0};    // Year
@@ -476,6 +488,18 @@ public:
         parent->add_on_time_hms_callback(
             [this](uint32_t data_identifier, uint32_t hour, uint32_t minute, uint32_t second) {
                 this->trigger(data_identifier, hour, minute, second);
+            });
+    }
+};
+
+class RelayStatusTrigger : public Trigger<uint32_t, uint32_t>
+{
+public:
+    explicit RelayStatusTrigger(DLT645Component* parent)
+    {
+        parent->add_on_relay_status_callback(
+            [this](uint32_t data_identifier, uint32_t status) {
+                this->trigger(data_identifier, status);
             });
     }
 };

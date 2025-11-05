@@ -24,6 +24,7 @@ This is an ESPHome external component for DL/T 645-2007 smart meter communicatio
 - Reverse active total energy (0x00020000)
 - Date and time (0x04000101)
 - Hours, minutes, seconds (0x04000102)
+- Relay status (local state tracking - updated on control commands)
 
 ## Architecture
 
@@ -49,6 +50,7 @@ The component uses:
 | `on_energy_reverse` | `Automation` | - | Reverse energy data event trigger |
 | `on_datetime` | `Automation` | - | Date and time data event trigger |
 | `on_time_hms` | `Automation` | - | Time (hours, minutes, seconds) data event trigger |
+| `on_relay_status` | `Automation` | - | Relay status data event trigger (0=closed, 1=open, 2=fault) |
 
 ## Usage Example
 
@@ -90,6 +92,12 @@ dlt645_component:
       - logger.log: 
           format: "Phase A Voltage: %.1f V"
           args: ['voltage_v']
+  on_relay_status:
+    then:
+      - logger.log:
+          format: "Relay Status: 0x%02X (DI: 0x%08X) - %s"
+          args: ['status', 'data_identifier', 
+                 'status == 0 ? "Closed" : (status == 1 ? "Open" : "Fault")']
 ```
 
 ## License
